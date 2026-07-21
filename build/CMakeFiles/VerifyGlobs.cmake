@@ -5,6 +5,8 @@
 file(GLOB_RECURSE NEW_GLOB LIST_DIRECTORIES false "D:/character_editor/src/*.cpp")
 set(OLD_GLOB
   "D:/character_editor/src/app/Application.cpp"
+  "D:/character_editor/src/app/FileDialog.cpp"
+  "D:/character_editor/src/clothing/ClothingManager.cpp"
   "D:/character_editor/src/core/GL.cpp"
   "D:/character_editor/src/editor/Presets.cpp"
   "D:/character_editor/src/editor/ShapeController.cpp"

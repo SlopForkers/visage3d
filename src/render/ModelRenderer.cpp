@@ -1,5 +1,6 @@
 #include "render/ModelRenderer.h"
 #include "core/GL.h"
+#include <algorithm>
 #include <cstdio>
 
 namespace ce {
@@ -143,16 +144,73 @@ unsigned ModelRenderer::uploadTexture(const Texture& tex) {
     return id;
 }
 
-void ModelRenderer::upload(Model& model) {
-    release();
+void ModelRenderer::uploadVertices(GpuPrim& gp, const Primitive& prim) {
+    std::vector<float> buf(gp.vertexCount * 6);
+    const std::vector<Vec3>& pos = prim.blendedPos.empty() ? prim.pos : prim.blendedPos;
+    const std::vector<Vec3>& nrm = prim.blendedNormal.empty() ? prim.normal : prim.blendedNormal;
+    for (size_t v = 0; v < gp.vertexCount; ++v) {
+        buf[v * 6 + 0] = pos[v].x;
+        buf[v * 6 + 1] = pos[v].y;
+        buf[v * 6 + 2] = pos[v].z;
+        if (v < nrm.size()) {
+            buf[v * 6 + 3] = nrm[v].x;
+            buf[v * 6 + 4] = nrm[v].y;
+            buf[v * 6 + 5] = nrm[v].z;
+        }
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, gp.vboDyn);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, buf.size() * sizeof(float), buf.data());
+}
 
-    textures_.reserve(model.textures.size());
-    for (const Texture& t : model.textures) textures_.push_back(uploadTexture(t));
+namespace {
+struct StaticVert {
+    float uv[2];
+    uint16_t joints[4];
+    float weights[4];
+};
+} // namespace
 
-    meshes_.resize(model.meshes.size());
+void ModelRenderer::uploadStatic(GpuPrim& gp, const Primitive& prim) {
+    std::vector<StaticVert> sv(gp.vertexCount);
+    bool skinned = !prim.joints.empty() && !prim.weights.empty();
+    for (size_t i = 0; i < gp.vertexCount; ++i) {
+        if (i < prim.uv.size()) { sv[i].uv[0] = prim.uv[i].x; sv[i].uv[1] = prim.uv[i].y; }
+        if (skinned) {
+            for (int k = 0; k < 4; ++k) {
+                sv[i].joints[k] = prim.joints[i * 4 + k];
+                const float* w = &prim.weights[i].x;
+                sv[i].weights[k] = w[k];
+            }
+        }
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, gp.vboStatic);
+    glBufferData(GL_ARRAY_BUFFER, sv.size() * sizeof(StaticVert), sv.data(), GL_STATIC_DRAW);
+}
+
+void ModelRenderer::syncStatic(int slotId) {
+    if (slotId < 0 || slotId >= static_cast<int>(slots_.size())) return;
+    GpuModelData& slot = slots_[slotId];
+    if (!slot.model) return;
+    for (size_t mi = 0; mi < slot.model->meshes.size() && mi < slot.meshes.size(); ++mi)
+        for (size_t pi = 0; pi < slot.model->meshes[mi].prims.size(); ++pi) {
+            Primitive& prim = slot.model->meshes[mi].prims[pi];
+            slot.meshes[mi].prims[pi].skinned = !prim.joints.empty() && !prim.weights.empty();
+            uploadStatic(slot.meshes[mi].prims[pi], prim);
+        }
+}
+
+int ModelRenderer::addModel(Model& model, int forceSkin) {
+    GpuModelData slot;
+    slot.model = &model;
+    slot.forceSkin = forceSkin;
+
+    slot.textures.reserve(model.textures.size());
+    for (const Texture& t : model.textures) slot.textures.push_back(uploadTexture(t));
+
+    slot.meshes.resize(model.meshes.size());
     for (size_t mi = 0; mi < model.meshes.size(); ++mi) {
         const Mesh& mesh = model.meshes[mi];
-        GpuMesh& gm = meshes_[mi];
+        GpuMesh& gm = slot.meshes[mi];
         gm.hasMorphs = !mesh.prims.empty() && !mesh.prims.front().morphs.empty();
 
         for (const Primitive& prim : mesh.prims) {
@@ -177,36 +235,17 @@ void ModelRenderer::upload(Model& model) {
                                   reinterpret_cast<void*>(3 * sizeof(float)));
 
             // static buffer: uv(2f) | joints(4 u16) | weights(4f)
-            if (!prim.uv.empty() || gp.skinned) {
-                struct StaticVert {
-                    float uv[2];
-                    uint16_t joints[4];
-                    float weights[4];
-                };
-                std::vector<StaticVert> sv(gp.vertexCount);
-                for (size_t i = 0; i < gp.vertexCount; ++i) {
-                    if (i < prim.uv.size()) { sv[i].uv[0] = prim.uv[i].x; sv[i].uv[1] = prim.uv[i].y; }
-                    if (gp.skinned) {
-                        for (int k = 0; k < 4; ++k) {
-                            sv[i].joints[k] = prim.joints[i * 4 + k];
-                            const float* w = &prim.weights[i].x;
-                            sv[i].weights[k] = w[k];
-                        }
-                    }
-                }
-                glGenBuffers(1, &gp.vboStatic);
-                glBindBuffer(GL_ARRAY_BUFFER, gp.vboStatic);
-                glBufferData(GL_ARRAY_BUFFER, sv.size() * sizeof(StaticVert), sv.data(),
-                             GL_STATIC_DRAW);
-                glEnableVertexAttribArray(2);
-                glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(StaticVert), nullptr);
-                glEnableVertexAttribArray(3);
-                glVertexAttribPointer(3, 4, GL_UNSIGNED_SHORT, GL_FALSE, sizeof(StaticVert),
-                                      reinterpret_cast<void*>(offsetof(StaticVert, joints)));
-                glEnableVertexAttribArray(4);
-                glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(StaticVert),
-                                      reinterpret_cast<void*>(offsetof(StaticVert, weights)));
-            }
+            glGenBuffers(1, &gp.vboStatic);
+            glBindBuffer(GL_ARRAY_BUFFER, gp.vboStatic);
+            uploadStatic(gp, prim);
+            glEnableVertexAttribArray(2);
+            glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(StaticVert), nullptr);
+            glEnableVertexAttribArray(3);
+            glVertexAttribPointer(3, 4, GL_UNSIGNED_SHORT, GL_FALSE, sizeof(StaticVert),
+                                  reinterpret_cast<void*>(offsetof(StaticVert, joints)));
+            glEnableVertexAttribArray(4);
+            glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(StaticVert),
+                                  reinterpret_cast<void*>(offsetof(StaticVert, weights)));
 
             glGenBuffers(1, &gp.ebo);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gp.ebo);
@@ -221,52 +260,91 @@ void ModelRenderer::upload(Model& model) {
         for (size_t pi = 0; pi < mesh.prims.size(); ++pi)
             uploadVertices(gm.prims[pi], mesh.prims[pi]);
     }
-}
 
-void ModelRenderer::uploadVertices(GpuPrim& gp, const Primitive& prim) {
-    std::vector<float> buf(gp.vertexCount * 6);
-    const std::vector<Vec3>& pos = prim.blendedPos.empty() ? prim.pos : prim.blendedPos;
-    const std::vector<Vec3>& nrm = prim.blendedNormal.empty() ? prim.normal : prim.blendedNormal;
-    for (size_t v = 0; v < gp.vertexCount; ++v) {
-        buf[v * 6 + 0] = pos[v].x;
-        buf[v * 6 + 1] = pos[v].y;
-        buf[v * 6 + 2] = pos[v].z;
-        if (v < nrm.size()) {
-            buf[v * 6 + 3] = nrm[v].x;
-            buf[v * 6 + 4] = nrm[v].y;
-            buf[v * 6 + 5] = nrm[v].z;
+    // reuse an empty slot if any
+    for (size_t i = 0; i < slots_.size(); ++i)
+        if (!slots_[i].model) {
+            slots_[i] = std::move(slot);
+            return static_cast<int>(i);
         }
-    }
-    glBindBuffer(GL_ARRAY_BUFFER, gp.vboDyn);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, buf.size() * sizeof(float), buf.data());
+    slots_.push_back(std::move(slot));
+    return static_cast<int>(slots_.size()) - 1;
 }
 
-void ModelRenderer::syncMorphs(Model& model) {
-    for (size_t mi = 0; mi < model.meshes.size() && mi < meshes_.size(); ++mi) {
-        GpuMesh& gm = meshes_[mi];
-        if (!gm.hasMorphs) continue;
+void ModelRenderer::syncVertices(int slotId) {
+    if (slotId < 0 || slotId >= static_cast<int>(slots_.size())) return;
+    GpuModelData& slot = slots_[slotId];
+    if (!slot.model) return;
+    Model& model = *slot.model;
+
+    for (size_t mi = 0; mi < model.meshes.size() && mi < slot.meshes.size(); ++mi) {
+        GpuMesh& gm = slot.meshes[mi];
         Mesh& mesh = model.meshes[mi];
-        for (size_t pi = 0; pi < mesh.prims.size(); ++pi) {
-            Primitive& prim = mesh.prims[pi];
+        if (gm.hasMorphs) {
             // CPU blend: base + sum(weight * delta)
-            prim.blendedPos = prim.pos;
-            prim.blendedNormal = prim.normal;
-            for (size_t ti = 0; ti < prim.morphs.size(); ++ti) {
-                float w = (ti < prim.morphWeights.size()) ? prim.morphWeights[ti] : 0.f;
-                if (w == 0.f) continue;
-                const MorphTarget& mt = prim.morphs[ti];
-                for (size_t v = 0; v < prim.blendedPos.size() && v < mt.dPos.size(); ++v)
-                    prim.blendedPos[v] += mt.dPos[v] * w;
-                if (!mt.dNormal.empty())
-                    for (size_t v = 0; v < prim.blendedNormal.size() && v < mt.dNormal.size(); ++v)
-                        prim.blendedNormal[v] += mt.dNormal[v] * w;
+            for (Primitive& prim : mesh.prims) {
+                prim.blendedPos = prim.pos;
+                prim.blendedNormal = prim.normal;
+                for (size_t ti = 0; ti < prim.morphs.size(); ++ti) {
+                    float w = (ti < prim.morphWeights.size()) ? prim.morphWeights[ti] : 0.f;
+                    if (w == 0.f) continue;
+                    const MorphTarget& mt = prim.morphs[ti];
+                    for (size_t v = 0; v < prim.blendedPos.size() && v < mt.dPos.size(); ++v)
+                        prim.blendedPos[v] += mt.dPos[v] * w;
+                    if (!mt.dNormal.empty())
+                        for (size_t v = 0; v < prim.blendedNormal.size() && v < mt.dNormal.size(); ++v)
+                            prim.blendedNormal[v] += mt.dNormal[v] * w;
+                }
             }
-            uploadVertices(gm.prims[pi], prim);
         }
+        for (size_t pi = 0; pi < mesh.prims.size(); ++pi)
+            uploadVertices(gm.prims[pi], mesh.prims[pi]);
     }
 }
 
-void ModelRenderer::drawPrim(const GpuPrim& gp, const Model& model) {
+void ModelRenderer::releaseSlot(GpuModelData& slot) {
+    for (GpuMesh& gm : slot.meshes)
+        for (GpuPrim& gp : gm.prims) {
+            if (gp.vao) glDeleteVertexArrays(1, &gp.vao);
+            if (gp.vboStatic) glDeleteBuffers(1, &gp.vboStatic);
+            if (gp.vboDyn) glDeleteBuffers(1, &gp.vboDyn);
+            if (gp.ebo) glDeleteBuffers(1, &gp.ebo);
+        }
+    slot.meshes.clear();
+    for (unsigned t : slot.textures)
+        if (t && t != whiteTex_) glDeleteTextures(1, &t);
+    slot.textures.clear();
+    slot.model = nullptr;
+}
+
+void ModelRenderer::removeModel(int slotId) {
+    if (slotId < 0 || slotId >= static_cast<int>(slots_.size())) return;
+    releaseSlot(slots_[slotId]);
+}
+
+void ModelRenderer::releaseAll() {
+    for (GpuModelData& slot : slots_) releaseSlot(slot);
+    slots_.clear();
+}
+
+void ModelRenderer::setVisible(int slotId, bool visible) {
+    if (slotId < 0 || slotId >= static_cast<int>(slots_.size())) return;
+    slots_[slotId].visible = visible;
+}
+
+bool ModelRenderer::hasModel() const {
+    for (const auto& s : slots_)
+        if (s.model && s.visible) return true;
+    return false;
+}
+
+bool ModelRenderer::isHairMaterial(const std::string& name) {
+    return name.find("HAIR") != std::string::npos || name.find("Hair") != std::string::npos ||
+           name.find("hair") != std::string::npos;
+}
+
+void ModelRenderer::drawPrim(const GpuPrim& gp, const GpuModelData& slot) {
+    const Model& model = *slot.model;
     const Material* mat = nullptr;
     if (gp.material >= 0 && gp.material < static_cast<int>(model.materials.size()))
         mat = &model.materials[gp.material];
@@ -282,9 +360,10 @@ void ModelRenderer::drawPrim(const GpuPrim& gp, const Model& model) {
         cutoff = mat->alphaCutoff;
         base = mat->baseColor;
         unlit = mat->unlit ? 1 : 0;
-        if (mat->texture >= 0 && mat->texture < static_cast<int>(textures_.size()))
-            tex = textures_[mat->texture];
+        if (mat->texture >= 0 && mat->texture < static_cast<int>(slot.textures.size()))
+            tex = slot.textures[mat->texture];
         doubleSided = mat->doubleSided;
+        if (isHairMaterial(mat->name)) base = base * hairTint;
     }
 
     if (doubleSided) glDisable(GL_CULL_FACE);
@@ -304,7 +383,48 @@ void ModelRenderer::drawPrim(const GpuPrim& gp, const Model& model) {
     glBindVertexArray(0);
 }
 
-void ModelRenderer::draw(const Model& model, const Skeleton& skeleton, const Camera& camera,
+void ModelRenderer::drawSlot(GpuModelData& slot, const Skeleton& skeleton,
+                             const Model& bodyModel, int pass) {
+    const Model& model = *slot.model;
+    // Clothing slots: vertices are in body bind space and index the body skin.
+    const Model& skinModel = (slot.forceSkin >= 0) ? bodyModel : model;
+
+    for (const MeshInstance& inst : model.meshInstances) {
+        if (inst.mesh < 0 || inst.mesh >= static_cast<int>(slot.meshes.size())) continue;
+        const GpuMesh& gm = slot.meshes[inst.mesh];
+
+        int skinToUse = (slot.forceSkin >= 0) ? slot.forceSkin : inst.skin;
+        bool anySkinned = false;
+        for (const GpuPrim& gp : gm.prims)
+            if (gp.skinned) { anySkinned = true; break; }
+
+        modelShader_.setInt("uUseSkin", 0);
+        modelShader_.setMat4("uNodeMat", slot.forceSkin >= 0 ? Mat4::identity()
+                                                             : skeleton.world()[inst.node]);
+        if (anySkinned && skinToUse >= 0 && skinToUse < static_cast<int>(skinModel.skins.size())) {
+            const Skin& skin = skinModel.skins[skinToUse];
+            int nb = std::min(static_cast<int>(skin.joints.size()), kMaxBones);
+            if (static_cast<int>(boneMats_.size()) < nb) boneMats_.resize(nb);
+            for (int i = 0; i < nb; ++i)
+                boneMats_[i] = skeleton.world()[skin.joints[i]] * skin.inverseBindMatrices[i];
+            modelShader_.setInt("uUseSkin", 1);
+            glUniformMatrix4fv(glGetUniformLocation(modelShader_.id(), "uBones"), nb, GL_FALSE,
+                               boneMats_[0].m);
+        }
+
+        for (const GpuPrim& gp : gm.prims) {
+            const Material* mat = nullptr;
+            if (gp.material >= 0 && gp.material < static_cast<int>(model.materials.size()))
+                mat = &model.materials[gp.material];
+            bool blended = mat && mat->alpha == Material::Alpha::Blend;
+            if ((pass == 1) != blended) continue;
+            if (hideHair && mat && isHairMaterial(mat->name)) continue;
+            drawPrim(gp, slot);
+        }
+    }
+}
+
+void ModelRenderer::draw(const Skeleton& skeleton, const Model& bodyModel, const Camera& camera,
                          float aspect, bool wireframe) {
     Mat4 vp = camera.projection(aspect) * camera.view();
     modelShader_.use();
@@ -313,42 +433,18 @@ void ModelRenderer::draw(const Model& model, const Skeleton& skeleton, const Cam
     modelShader_.setVec3("uCamPos", camera.eye());
 
     if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
     glEnable(GL_DEPTH_TEST);
 
-    // two passes: opaque+mask first, then blended with depth writes off
+    // two passes across all slots: opaque+mask first, then blended w/o depth writes
     for (int pass = 0; pass < 2; ++pass) {
         if (pass == 1) {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glDepthMask(GL_FALSE);
         }
-        for (const MeshInstance& inst : model.meshInstances) {
-            if (inst.mesh < 0 || inst.mesh >= static_cast<int>(meshes_.size())) continue;
-            const GpuMesh& gm = meshes_[inst.mesh];
-
-            modelShader_.setInt("uUseSkin", 0);
-            modelShader_.setMat4("uNodeMat", skeleton.world()[inst.node]);
-            if (inst.skin >= 0 && inst.skin < static_cast<int>(model.skins.size())) {
-                skeleton.skinMatrices(inst.skin, boneMats_, boneNrms_);
-                int nb = static_cast<int>(boneMats_.size());
-                if (nb > kMaxBones) {
-                    nb = kMaxBones; // safety: never overflow the uniform array
-                }
-                modelShader_.setInt("uUseSkin", 1);
-                glUniformMatrix4fv(
-                    glGetUniformLocation(modelShader_.id(), "uBones"), nb, GL_FALSE,
-                    boneMats_[0].m);
-            }
-
-            for (const GpuPrim& gp : gm.prims) {
-                const Material* mat = nullptr;
-                if (gp.material >= 0 && gp.material < static_cast<int>(model.materials.size()))
-                    mat = &model.materials[gp.material];
-                bool blended = mat && mat->alpha == Material::Alpha::Blend;
-                if ((pass == 1) != blended) continue;
-                drawPrim(gp, model);
-            }
+        for (GpuModelData& slot : slots_) {
+            if (!slot.model || !slot.visible) continue;
+            drawSlot(slot, skeleton, bodyModel, pass);
         }
     }
 
@@ -367,20 +463,6 @@ void ModelRenderer::drawGrid(const Camera& camera, float aspect) {
     glBindVertexArray(gridVao_);
     glDrawArrays(GL_LINES, 0, gridVertexCount_);
     glBindVertexArray(0);
-}
-
-void ModelRenderer::release() {
-    for (GpuMesh& gm : meshes_)
-        for (GpuPrim& gp : gm.prims) {
-            if (gp.vao) glDeleteVertexArrays(1, &gp.vao);
-            if (gp.vboStatic) glDeleteBuffers(1, &gp.vboStatic);
-            if (gp.vboDyn) glDeleteBuffers(1, &gp.vboDyn);
-            if (gp.ebo) glDeleteBuffers(1, &gp.ebo);
-        }
-    meshes_.clear();
-    for (unsigned t : textures_)
-        if (t && t != whiteTex_) glDeleteTextures(1, &t);
-    textures_.clear();
 }
 
 } // namespace ce

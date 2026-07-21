@@ -336,6 +336,54 @@ src/app/Application.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/app/Application.cpp.s
 .PHONY : src/app/Application.cpp.s
 
+src/app/FileDialog.obj: src/app/FileDialog.cpp.obj
+.PHONY : src/app/FileDialog.obj
+
+# target to build an object file
+src/app/FileDialog.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/app/FileDialog.cpp.obj
+.PHONY : src/app/FileDialog.cpp.obj
+
+src/app/FileDialog.i: src/app/FileDialog.cpp.i
+.PHONY : src/app/FileDialog.i
+
+# target to preprocess a source file
+src/app/FileDialog.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/app/FileDialog.cpp.i
+.PHONY : src/app/FileDialog.cpp.i
+
+src/app/FileDialog.s: src/app/FileDialog.cpp.s
+.PHONY : src/app/FileDialog.s
+
+# target to generate assembly for a file
+src/app/FileDialog.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/app/FileDialog.cpp.s
+.PHONY : src/app/FileDialog.cpp.s
+
+src/clothing/ClothingManager.obj: src/clothing/ClothingManager.cpp.obj
+.PHONY : src/clothing/ClothingManager.obj
+
+# target to build an object file
+src/clothing/ClothingManager.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/clothing/ClothingManager.cpp.obj
+.PHONY : src/clothing/ClothingManager.cpp.obj
+
+src/clothing/ClothingManager.i: src/clothing/ClothingManager.cpp.i
+.PHONY : src/clothing/ClothingManager.i
+
+# target to preprocess a source file
+src/clothing/ClothingManager.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/clothing/ClothingManager.cpp.i
+.PHONY : src/clothing/ClothingManager.cpp.i
+
+src/clothing/ClothingManager.s: src/clothing/ClothingManager.cpp.s
+.PHONY : src/clothing/ClothingManager.s
+
+# target to generate assembly for a file
+src/clothing/ClothingManager.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/clothing/ClothingManager.cpp.s
+.PHONY : src/clothing/ClothingManager.cpp.s
+
 src/core/GL.obj: src/core/GL.cpp.obj
 .PHONY : src/core/GL.obj
 
@@ -609,6 +657,12 @@ help:
 	@echo ... src/app/Application.obj
 	@echo ... src/app/Application.i
 	@echo ... src/app/Application.s
+	@echo ... src/app/FileDialog.obj
+	@echo ... src/app/FileDialog.i
+	@echo ... src/app/FileDialog.s
+	@echo ... src/clothing/ClothingManager.obj
+	@echo ... src/clothing/ClothingManager.i
+	@echo ... src/clothing/ClothingManager.s
 	@echo ... src/core/GL.obj
 	@echo ... src/core/GL.i
 	@echo ... src/core/GL.s

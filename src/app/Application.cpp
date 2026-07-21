@@ -48,6 +48,8 @@ bool Application::init(int argc, char** argv) {
         else if (a == "--yaw") optYawDeg_ = std::atof(next().c_str());
         else if (a == "--dist") optDist_ = std::atof(next().c_str());
         else if (a == "--targety") optTargetY_ = std::atof(next().c_str());
+        else if (a == "--clothe") optClothes_.push_back(next());
+        else if (a == "--listparams") listParams_ = true;
         else if (a == "--set") {
             std::string s = next(); // id=value
             size_t eq = s.find('=');
@@ -124,14 +126,29 @@ bool Application::init(int argc, char** argv) {
     ui_.controller = &controller_;
     ui_.presets = &presets_;
     ui_.model = &model_;
+    ui_.clothing = &clothing_;
     ui_.cb.openModel = [this](const std::string& p) { loadModel(p); };
+    ui_.cb.openClothing = [this](const std::string& p) { addClothing(p); };
     ui_.cb.saveScreenshot = [this](const std::string& p) { saveScreenshot(p); };
     ui_.cb.resetCamera = [this]() { resetCamera(); };
+    ui_.cb.refitClothing = [this](int i) { refitClothing(i); };
+    ui_.cb.padClothing = [this](int i) { padClothing(i); };
+    ui_.cb.removeClothing = [this](int i) { removeClothing(i); };
+    ui_.cb.clothingVisible = [this](int i, bool v) { setClothingVisible(i, v); };
+    ui_.cb.applyClothingPreset = [this](const nlohmann::json& j) { applyClothingPreset(j); };
 
     // ---- initial state ----
     if (!optModel_.empty()) loadModel(optModel_);
+    if (listParams_) {
+        for (const auto& p : controller_.params()) {
+            std::string kind = p.type == ShapeParam::Type::Morph ? "morph" : "bone";
+            std::fprintf(stderr, "[%s] %s (%s) rules=%zu trans=%zu\n", kind.c_str(),
+                         p.id.c_str(), p.group.c_str(), p.rules.size(), p.translateRules.size());
+        }
+    }
     if (!optPreset_.empty()) applyPreset(optPreset_);
     for (const auto& kv : optSet_) controller_.setValue(kv.first, kv.second);
+    for (const std::string& c : optClothes_) addClothing(c);
     camera_.yaw = optYawDeg_ * 0.01745329252f;
     if (optDist_ > 0.f) camera_.distance = optDist_;
     if (optTargetY_ > 0.f) camera_.target.y = optTargetY_;
@@ -148,11 +165,21 @@ bool Application::loadModel(const std::string& path) {
         std::fprintf(stderr, "Load failed: %s\n", err.c_str());
         return false;
     }
+
+    clearClothing();
+    if (bodySlot_ >= 0) {
+        renderer_.removeModel(bodySlot_);
+        bodySlot_ = -1;
+    }
+
     model_ = std::move(newModel);
     skeleton_.bind(model_);
     controller_.bind(model_, skeleton_);
     controller_.scan("config/body_params.json");
-    renderer_.upload(model_);
+    skeleton_.update(); // world matrices must be valid before clothing weight transfer
+    clothing_.bind(model_, skeleton_);
+
+    bodySlot_ = renderer_.addModel(model_, -1);
     controller_.morphsDirty = true;
     ui_.status = "Загружено: " + model_.fileName;
     return true;
@@ -161,8 +188,10 @@ bool Application::loadModel(const std::string& path) {
 void Application::applyPreset(const std::string& name) {
     std::string err;
     std::map<std::string, float> vals;
-    if (presets_.load(name, vals, err)) {
+    nlohmann::json clothJson;
+    if (presets_.load(name, vals, clothJson, err)) {
         controller_.setValues(vals);
+        applyClothingPreset(clothJson);
         ui_.status = "Пресет загружен: " + name;
     } else {
         ui_.status = "Пресет не найден: " + err;
@@ -175,6 +204,84 @@ void Application::resetCamera() {
 
 void Application::saveScreenshot(const std::string& path) {
     pendingScreenshot_ = path; // captured after the next scene render
+}
+
+// ---- clothing pipeline ----
+
+void Application::addClothing(const std::string& path) {
+    std::string err;
+    double t0 = glfwGetTime();
+    int idx = clothing_.add(path, err); // includes auto unit scale + weight transfer
+    if (idx < 0) {
+        ui_.status = "Одежда не загружена: " + err;
+        std::fprintf(stderr, "Clothing load failed: %s\n", err.c_str());
+        return;
+    }
+    double t1 = glfwGetTime();
+    ClothingItem& item = clothing_.items()[idx];
+    item.renderSlot = renderer_.addModel(item.model, clothing_.bodySkinIndex());
+    renderer_.setVisible(item.renderSlot, item.visible);
+    double t2 = glfwGetTime();
+    std::fprintf(stderr, "Clothing '%s': fit %.2fs, upload %.2fs\n", item.name.c_str(), t1 - t0,
+                 t2 - t1);
+    ui_.status = "Одежда добавлена: " + item.name;
+}
+
+void Application::refitClothing(int index) {
+    if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
+    clothing_.refit(index);
+    ClothingItem& item = clothing_.items()[index];
+    renderer_.syncStatic(item.renderSlot);  // joints/weights changed
+    renderer_.syncVertices(item.renderSlot);
+}
+
+void Application::padClothing(int index) {
+    if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
+    clothing_.applyPadding(index);
+    renderer_.syncVertices(clothing_.items()[index].renderSlot);
+}
+
+void Application::removeClothing(int index) {
+    if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
+    renderer_.removeModel(clothing_.items()[index].renderSlot);
+    clothing_.remove(index);
+    ui_.status = "Одежда удалена";
+}
+
+void Application::setClothingVisible(int index, bool visible) {
+    if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
+    renderer_.setVisible(clothing_.items()[index].renderSlot, visible);
+}
+
+void Application::clearClothing() {
+    for (ClothingItem& item : clothing_.items())
+        if (item.renderSlot >= 0) renderer_.removeModel(item.renderSlot);
+    clothing_.clear();
+}
+
+void Application::applyClothingPreset(const nlohmann::json& items) {
+    if (!items.is_array()) return;
+    clearClothing();
+    for (const auto& e : items) {
+        std::string path = e.value("path", std::string{});
+        if (path.empty()) continue;
+        std::string err;
+        int idx = clothing_.add(path, err);
+        if (idx < 0) {
+            ui_.status = "Не найдена одежда пресета: " + path;
+            continue;
+        }
+        ClothingItem& item = clothing_.items()[idx];
+        item.fitScale = e.value("fitScale", item.fitScale);
+        if (e.contains("fitOffset") && e["fitOffset"].size() == 3)
+            item.fitOffset = {e["fitOffset"][0].get<float>(), e["fitOffset"][1].get<float>(),
+                              e["fitOffset"][2].get<float>()};
+        item.padding = e.value("padding", item.padding);
+        item.visible = e.value("visible", true);
+        clothing_.refit(idx); // re-transfer with stored fit params
+        item.renderSlot = renderer_.addModel(item.model, clothing_.bodySkinIndex());
+        renderer_.setVisible(item.renderSlot, item.visible);
+    }
 }
 
 void Application::handleInput(float /*dt*/) {
@@ -232,8 +339,24 @@ int Application::run() {
 
         skeleton_.update();
         if (controller_.morphsDirty) {
-            renderer_.syncMorphs(model_);
+            renderer_.syncVertices(bodySlot_);
             controller_.morphsDirty = false;
+        }
+        renderer_.hideHair = !ui_.hairVisible;
+        renderer_.hairTint = Vec4{ui_.hairTint[0], ui_.hairTint[1], ui_.hairTint[2], 1.f};
+
+        // debounced clothing refit (fits adapt to the new body shape)
+        if (controller_.revision != seenRevision_) {
+            seenRevision_ = controller_.revision;
+            refitAt_ = now + 0.75;
+        }
+        if (ui_.autoRefit && refitAt_ > 0.0 && now >= refitAt_ &&
+            !clothing_.items().empty()) {
+            refitAt_ = 0.0;
+            std::fprintf(stderr, "Auto-refit clothing for body revision %llu\n",
+                         static_cast<unsigned long long>(controller_.revision));
+            for (int i = 0; i < static_cast<int>(clothing_.items().size()); ++i)
+                refitClothing(i);
         }
 
         // ---- render scene ----
@@ -243,7 +366,7 @@ int Application::run() {
 
         if (ui_.showGrid) renderer_.drawGrid(camera_, aspect);
         if (renderer_.hasModel())
-            renderer_.draw(model_, skeleton_, camera_, aspect, ui_.wireframe);
+            renderer_.draw(skeleton_, model_, camera_, aspect, ui_.wireframe);
 
         // screenshot of the pure 3D scene (before UI is drawn)
         if (!pendingScreenshot_.empty()) {
@@ -275,7 +398,7 @@ int Application::run() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    renderer_.release();
+    renderer_.releaseAll();
     glfwDestroyWindow(window_);
     glfwTerminate();
     return 0;

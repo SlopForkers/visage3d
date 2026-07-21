@@ -84,19 +84,41 @@ void ShapeController::setValues(const std::map<std::string, float>& v) {
     apply();
 }
 
-int ShapeController::findBone(const std::vector<std::string>& names,
-                              const std::vector<std::string>& patterns) const {
-    for (size_t i = 0; i < model_->nodes.size(); ++i)
-        if (std::find(names.begin(), names.end(), model_->nodes[i].name) != names.end())
-            return static_cast<int>(i);
-    for (const std::string& pat : patterns) {
-        std::regex re(pat);
-        for (size_t i = 0; i < model_->nodes.size(); ++i)
-            if (std::regex_search(model_->nodes[i].name, re))
-                return static_cast<int>(i);
+std::vector<int> ShapeController::matchBones(const std::vector<std::string>& names,
+                                             const std::vector<std::string>& patterns) const {
+    std::vector<int> out;
+    for (size_t i = 0; i < model_->nodes.size(); ++i) {
+        const std::string& bn = model_->nodes[i].name;
+        bool hit = std::find(names.begin(), names.end(), bn) != names.end();
+        if (!hit)
+            for (const std::string& pat : patterns) {
+                try {
+                    if (std::regex_search(bn, std::regex(pat))) { hit = true; break; }
+                } catch (...) { /* invalid pattern: ignore */ }
+            }
+        if (hit && std::find(out.begin(), out.end(), static_cast<int>(i)) == out.end())
+            out.push_back(static_cast<int>(i));
     }
-    return -1;
+    return out;
 }
+
+namespace {
+
+void readNamesPatterns(const nlohmann::json& j, std::vector<std::string>& names,
+                       std::vector<std::string>& patterns) {
+    if (j.contains("bones"))
+        for (const auto& b : j["bones"]) names.push_back(b.get<std::string>());
+    if (j.contains("patterns"))
+        for (const auto& b : j["patterns"]) patterns.push_back(b.get<std::string>());
+}
+
+Vec3 readVec3(const nlohmann::json& j, const char* key, const Vec3& def) {
+    if (j.contains(key) && j[key].size() == 3)
+        return {j[key][0].get<float>(), j[key][1].get<float>(), j[key][2].get<float>()};
+    return def;
+}
+
+} // namespace
 
 void ShapeController::addBoneParamsFromRules(const std::string& configPath) {
     nlohmann::json rules;
@@ -118,34 +140,51 @@ void ShapeController::addBoneParamsFromRules(const std::string& configPath) {
         p.group = r.value("group", std::string{"Body"});
         p.minS = r.value("min", 0.5f);
         p.maxS = r.value("max", 1.5f);
-        p.compensate = r.value("compensate", false);
-        if (r.contains("axes") && r["axes"].size() == 3)
-            p.axes = {r["axes"][0].get<float>(), r["axes"][1].get<float>(), r["axes"][2].get<float>()};
-        // default: scale 1.0 mapped into normalized space
         p.defValue = (p.maxS > p.minS) ? std::clamp((1.f - p.minS) / (p.maxS - p.minS), 0.f, 1.f) : 0.5f;
         p.value = p.defValue;
 
-        // Collect all matching bones (exact names first, then regex patterns).
-        std::vector<std::string> names, patterns;
-        if (r.contains("bones"))
-            for (const auto& b : r["bones"]) names.push_back(b.get<std::string>());
-        if (r.contains("patterns"))
-            for (const auto& b : r["patterns"]) patterns.push_back(b.get<std::string>());
+        bool hasContent = false;
 
-        for (size_t i = 0; i < model_->nodes.size(); ++i) {
-            const std::string& bn = model_->nodes[i].name;
-            bool hit = std::find(names.begin(), names.end(), bn) != names.end();
-            if (!hit)
-                for (const auto& pat : patterns) {
-                    try {
-                        if (std::regex_search(bn, std::regex(pat))) { hit = true; break; }
-                    } catch (...) { /* invalid pattern: ignore */ }
-                }
-            if (hit && std::find(p.bones.begin(), p.bones.end(), static_cast<int>(i)) == p.bones.end())
-                p.bones.push_back(static_cast<int>(i));
+        // Format A (flat, backward compatible): bones/patterns/axes/compensate at top level
+        if (r.contains("bones") || r.contains("patterns")) {
+            std::vector<std::string> names, patterns;
+            readNamesPatterns(r, names, patterns);
+            ShapeParam::BoneRule br;
+            br.bones = matchBones(names, patterns);
+            br.axes = readVec3(r, "axes", Vec3{1, 1, 1});
+            br.compensate = r.value("compensate", false);
+            if (!br.bones.empty()) { p.rules.push_back(std::move(br)); hasContent = true; }
         }
 
-        if (!p.bones.empty() && !p.id.empty() && !find(p.id))
+        // Format B (entries): per-rule axes + optional translate rules
+        if (r.contains("entries")) {
+            for (const auto& e : r["entries"]) {
+                if (e.contains("translate")) {
+                    const auto& t = e["translate"];
+                    std::vector<std::string> names, patterns;
+                    readNamesPatterns(t, names, patterns);
+                    ShapeParam::TranslateRule tr;
+                    tr.bones = matchBones(names, patterns);
+                    tr.axis = readVec3(t, "axis", Vec3{0, 1, 0});
+                    tr.factor = t.value("factor", 0.f);
+                    tr.scaleMode = t.value("mode", std::string{"value"}) == "scale";
+                    if (!tr.bones.empty() && tr.factor != 0.f) {
+                        p.translateRules.push_back(std::move(tr));
+                        hasContent = true;
+                    }
+                } else {
+                    std::vector<std::string> names, patterns;
+                    readNamesPatterns(e, names, patterns);
+                    ShapeParam::BoneRule br;
+                    br.bones = matchBones(names, patterns);
+                    br.axes = readVec3(e, "axes", Vec3{1, 1, 1});
+                    br.compensate = e.value("compensate", false);
+                    if (!br.bones.empty()) { p.rules.push_back(std::move(br)); hasContent = true; }
+                }
+            }
+        }
+
+        if (hasContent && !p.id.empty() && !find(p.id))
             params_.push_back(std::move(p));
     }
 }
@@ -198,25 +237,39 @@ std::string ShapeController::morphLabel(const std::string& n) {
 
 void ShapeController::apply() {
     Model& m = *model_;
+    ++revision;
 
     // 1) reset skeleton offsets
     for (auto& o : skeleton_->scaleOffset) o = {1, 1, 1};
+    for (auto& o : skeleton_->translateOffset) o = {0, 0, 0};
 
-    // 2) bone-scale params
+    // 2) bone-driven params
     for (const ShapeParam& p : params_) {
         if (p.type != ShapeParam::Type::BoneScale) continue;
         float s = p.minS + (p.maxS - p.minS) * p.value;
-        Vec3 sv{std::pow(s, p.axes.x), std::pow(s, p.axes.y), std::pow(s, p.axes.z)};
-        for (int b : p.bones) {
-            skeleton_->scaleOffset[b] = skeleton_->scaleOffset[b] * sv;
-            if (p.compensate) {
-                for (int c : m.nodes[b].children) {
-                    // do not compensate children that are themselves targets
-                    if (std::find(p.bones.begin(), p.bones.end(), c) != p.bones.end()) continue;
-                    Vec3& co = skeleton_->scaleOffset[c];
-                    co.x /= sv.x; co.y /= sv.y; co.z /= sv.z;
+
+        for (const auto& rule : p.rules) {
+            Vec3 sv{std::pow(s, rule.axes.x), std::pow(s, rule.axes.y), std::pow(s, rule.axes.z)};
+            for (int b : rule.bones) {
+                skeleton_->scaleOffset[b] = skeleton_->scaleOffset[b] * sv;
+                if (rule.compensate) {
+                    for (int c : m.nodes[b].children) {
+                        // do not compensate children that are themselves targets
+                        if (std::find(rule.bones.begin(), rule.bones.end(), c) != rule.bones.end())
+                            continue;
+                        Vec3& co = skeleton_->scaleOffset[c];
+                        co.x /= sv.x; co.y /= sv.y; co.z /= sv.z;
+                    }
                 }
             }
+        }
+
+        for (const auto& tr : p.translateRules) {
+            float k = tr.scaleMode ? tr.factor * (s - 1.f)
+                                   : tr.factor * (p.value - p.defValue);
+            Vec3 off = tr.axis * k;
+            for (int b : tr.bones)
+                skeleton_->translateOffset[b] = skeleton_->translateOffset[b] + off;
         }
     }
 

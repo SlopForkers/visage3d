@@ -32,6 +32,8 @@ struct Vec4 {
     float x = 0.f, y = 0.f, z = 0.f, w = 0.f;
     Vec4() = default;
     Vec4(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
+    Vec4 operator*(const Vec4& o) const { return {x * o.x, y * o.y, z * o.z, w * o.w}; }
+    Vec4 operator*(float s) const { return {x * s, y * s, z * s, w * s}; }
 };
 
 struct Quat {

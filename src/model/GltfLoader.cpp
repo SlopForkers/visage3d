@@ -160,21 +160,33 @@ std::vector<std::string> targetNames(const tinygltf::Mesh& mesh, size_t count) {
 }
 
 Quat mat3ToQuat(const Mat3& r) {
-    // r should be a pure rotation matrix
+    // r should be a pure rotation matrix; column-major layout m[col*3 + row]
     float trace = r.m[0] + r.m[4] + r.m[8];
     Quat q;
     if (trace > 0.f) {
         float s = std::sqrt(trace + 1.f) * 2.f;
-        q.w = 0.25f * s; q.x = (r.m[6] - r.m[7]) / s; q.y = (r.m[2] - r.m[8]) / s; q.z = (r.m[1] - r.m[3]) / s;
+        q.w = 0.25f * s;
+        q.x = (r.m[5] - r.m[7]) / s;
+        q.y = (r.m[6] - r.m[2]) / s;
+        q.z = (r.m[1] - r.m[3]) / s;
     } else if (r.m[0] > r.m[4] && r.m[0] > r.m[8]) {
         float s = std::sqrt(1.f + r.m[0] - r.m[4] - r.m[8]) * 2.f;
-        q.w = (r.m[6] - r.m[7]) / s; q.x = 0.25f * s; q.y = (r.m[3] + r.m[1]) / s; q.z = (r.m[2] + r.m[8]) / s;
+        q.w = (r.m[5] - r.m[7]) / s;
+        q.x = 0.25f * s;
+        q.y = (r.m[3] + r.m[1]) / s;
+        q.z = (r.m[6] + r.m[2]) / s;
     } else if (r.m[4] > r.m[8]) {
         float s = std::sqrt(1.f + r.m[4] - r.m[0] - r.m[8]) * 2.f;
-        q.w = (r.m[2] - r.m[8]) / s; q.x = (r.m[3] + r.m[1]) / s; q.y = 0.25f * s; q.z = (r.m[6] + r.m[7]) / s;
+        q.w = (r.m[6] - r.m[2]) / s;
+        q.x = (r.m[3] + r.m[1]) / s;
+        q.y = 0.25f * s;
+        q.z = (r.m[7] + r.m[5]) / s;
     } else {
         float s = std::sqrt(1.f + r.m[8] - r.m[0] - r.m[4]) * 2.f;
-        q.w = (r.m[1] - r.m[3]) / s; q.x = (r.m[2] + r.m[8]) / s; q.y = (r.m[6] + r.m[7]) / s; q.z = 0.25f * s;
+        q.w = (r.m[1] - r.m[3]) / s;
+        q.x = (r.m[6] + r.m[2]) / s;
+        q.y = (r.m[7] + r.m[5]) / s;
+        q.z = 0.25f * s;
     }
     return q.normalized();
 }

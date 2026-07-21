@@ -1,5 +1,4 @@
 #include "editor/Presets.h"
-#include "json.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -16,13 +15,15 @@ std::string Presets::pathFor(const std::string& presetName) const {
 }
 
 bool Presets::save(const std::string& presetName, const std::string& modelName,
-                   const std::map<std::string, float>& values, std::string& error) const {
+                   const std::map<std::string, float>& values,
+                   const nlohmann::json& clothing, std::string& error) const {
     try {
         std::filesystem::create_directories(dir_);
         nlohmann::json j;
         j["model"] = modelName;
         j["values"] = nlohmann::json::object();
         for (const auto& kv : values) j["values"][kv.first] = kv.second;
+        j["clothing"] = clothing;
         std::ofstream f(pathFor(presetName));
         if (!f) { error = "Cannot write preset file"; return false; }
         f << j.dump(2);
@@ -34,7 +35,7 @@ bool Presets::save(const std::string& presetName, const std::string& modelName,
 }
 
 bool Presets::load(const std::string& presetName, std::map<std::string, float>& outValues,
-                   std::string& error) const {
+                   nlohmann::json& outClothing, std::string& error) const {
     try {
         std::ifstream f(pathFor(presetName));
         if (!f) { error = "Preset not found: " + presetName; return false; }
@@ -43,6 +44,7 @@ bool Presets::load(const std::string& presetName, std::map<std::string, float>& 
         if (j.contains("values"))
             for (auto it = j["values"].begin(); it != j["values"].end(); ++it)
                 outValues[it.key()] = it.value().get<float>();
+        outClothing = j.contains("clothing") ? j["clothing"] : nlohmann::json::array();
         return true;
     } catch (const std::exception& e) {
         error = e.what();

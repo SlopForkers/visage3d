@@ -19,6 +19,8 @@ public:
 
     // Multiplicative local scale offset per node (default (1,1,1)).
     std::vector<Vec3> scaleOffset;
+    // Additive local translation offset per node (default (0,0,0)).
+    std::vector<Vec3> translateOffset;
 
     const std::vector<Mat4>& world() const { return world_; }
     int jointOfNode(int nodeIndex) const; // index within skin joint array, or -1

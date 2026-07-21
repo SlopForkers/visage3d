@@ -1,0 +1,11 @@
+Model Information:
+* title:	Pleated Skirt
+* source:	https://sketchfab.com/3d-models/pleated-skirt-1be1cb560a934bd5a4ef6051b90197dd
+* author:	Ali Şahan Yalçın (https://sketchfab.com/alisahanyalcin)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Pleated Skirt" (https://sketchfab.com/3d-models/pleated-skirt-1be1cb560a934bd5a4ef6051b90197dd) by Ali Şahan Yalçın (https://sketchfab.com/alisahanyalcin) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

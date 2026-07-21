@@ -9,6 +9,8 @@ set(CMAKE_DEPENDS_LANGUAGES
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "D:/character_editor/src/app/Application.cpp" "CMakeFiles/character_editor.dir/src/app/Application.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/app/Application.cpp.obj.d"
+  "D:/character_editor/src/app/FileDialog.cpp" "CMakeFiles/character_editor.dir/src/app/FileDialog.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/app/FileDialog.cpp.obj.d"
+  "D:/character_editor/src/clothing/ClothingManager.cpp" "CMakeFiles/character_editor.dir/src/clothing/ClothingManager.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/clothing/ClothingManager.cpp.obj.d"
   "D:/character_editor/src/core/GL.cpp" "CMakeFiles/character_editor.dir/src/core/GL.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/core/GL.cpp.obj.d"
   "D:/character_editor/src/editor/Presets.cpp" "CMakeFiles/character_editor.dir/src/editor/Presets.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/editor/Presets.cpp.obj.d"
   "D:/character_editor/src/editor/ShapeController.cpp" "CMakeFiles/character_editor.dir/src/editor/ShapeController.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/editor/ShapeController.cpp.obj.d"

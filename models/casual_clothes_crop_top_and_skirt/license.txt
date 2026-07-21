@@ -1,0 +1,11 @@
+Model Information:
+* title:	Casual clothes (crop top and skirt)
+* source:	https://sketchfab.com/3d-models/casual-clothes-crop-top-and-skirt-ac4acd4d992844cca1257bc71041738c
+* author:	ZahraAmini (https://sketchfab.com/ZahraAmini)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Casual clothes (crop top and skirt)" (https://sketchfab.com/3d-models/casual-clothes-crop-top-and-skirt-ac4acd4d992844cca1257bc71041738c) by ZahraAmini (https://sketchfab.com/ZahraAmini) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

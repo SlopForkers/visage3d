@@ -1,0 +1,626 @@
+{
+  "accessors": [
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 6354,
+      "max": [
+        12.279107093811035,
+        124.5709228515625,
+        6.618095397949219
+      ],
+      "min": [
+        -14.344700813293457,
+        119.42243957519531,
+        -11.083295822143555
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 76248,
+      "componentType": 5126,
+      "count": 6354,
+      "max": [
+        0.999813437461853,
+        0.9999905824661255,
+        0.9999698400497437
+      ],
+      "min": [
+        -0.9998911619186401,
+        -0.9996917843818665,
+        -0.9999783635139465
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 6354,
+      "max": [
+        0.22593964636325836,
+        0.06516272574663162
+      ],
+      "min": [
+        -0.22593961656093597,
+        -0.033900246024131775
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 50832,
+      "componentType": 5126,
+      "count": 6354,
+      "max": [
+        0.22593964636325836,
+        0.06516272574663162
+      ],
+      "min": [
+        -0.22593961656093597,
+        -0.033900246024131775
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "componentType": 5125,
+      "count": 32316,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 152496,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        16.50868034362793,
+        124.38677215576172,
+        9.153463363647461
+      ],
+      "min": [
+        -21.587081909179688,
+        85.45225524902344,
+        -16.712377548217773
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 938880,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        0.9999825954437256,
+        0.9999679923057556,
+        0.9999995827674866
+      ],
+      "min": [
+        -0.9999879002571106,
+        -0.9999931454658508,
+        -0.999996542930603
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 101664,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        0.08623702824115753,
+        0.33810457587242126
+      ],
+      "min": [
+        -0.08601175993680954,
+        -0.5646702647209167
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 625920,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        0.08623702824115753,
+        0.33810457587242126
+      ],
+      "min": [
+        -0.08601175993680954,
+        -0.5646702647209167
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 129264,
+      "componentType": 5125,
+      "count": 355734,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 1725264,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        19.978321075439453,
+        124.57083892822266,
+        6.417060852050781
+      ],
+      "min": [
+        -22.219099044799805,
+        85.6989974975586,
+        -17.703100204467773
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 2511648,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        0.9999989867210388,
+        0.9996341466903687,
+        0.9999875426292419
+      ],
+      "min": [
+        -0.9999989867210388,
+        -0.9999426007270813,
+        -0.9999874830245972
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 1150176,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        0.08623702824115753,
+        0.33810457587242126
+      ],
+      "min": [
+        -0.08601153641939163,
+        -0.5646702647209167
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 1674432,
+      "componentType": 5126,
+      "count": 65532,
+      "max": [
+        0.08623702824115753,
+        0.33810457587242126
+      ],
+      "min": [
+        -0.08601153641939163,
+        -0.5646702647209167
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 1552200,
+      "componentType": 5125,
+      "count": 355179,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 3298032,
+      "componentType": 5126,
+      "count": 6413,
+      "max": [
+        15.830728530883789,
+        124.36556243896484,
+        6.139281749725342
+      ],
+      "min": [
+        -18.67310333251953,
+        86.36603546142578,
+        -13.38934326171875
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 3374988,
+      "componentType": 5126,
+      "count": 6413,
+      "max": [
+        0.9985880255699158,
+        0.9996700286865234,
+        0.9997667074203491
+      ],
+      "min": [
+        -0.9974186420440674,
+        -0.998365581035614,
+        -0.9999582767486572
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 2198688,
+      "componentType": 5126,
+      "count": 6413,
+      "max": [
+        0.08623693883419037,
+        0.33810457587242126
+      ],
+      "min": [
+        -0.08601155132055283,
+        -0.5646701455116272
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 2249992,
+      "componentType": 5126,
+      "count": 6413,
+      "max": [
+        0.08623693883419037,
+        0.33810457587242126
+      ],
+      "min": [
+        -0.08601155132055283,
+        -0.5646701455116272
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 2972916,
+      "componentType": 5125,
+      "count": 32103,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 3451944,
+      "componentType": 5126,
+      "count": 19872,
+      "max": [
+        20.09347915649414,
+        87.56570434570313,
+        9.209378242492676
+      ],
+      "min": [
+        -22.357269287109375,
+        84.45415496826172,
+        -17.794029235839844
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 3690408,
+      "componentType": 5126,
+      "count": 19872,
+      "max": [
+        0.9999392032623291,
+        0.9999792575836182,
+        0.9999955892562866
+      ],
+      "min": [
+        -0.9999661445617676,
+        -0.9999669194221497,
+        -0.9999926686286926
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 2301296,
+      "componentType": 5126,
+      "count": 19872,
+      "max": [
+        58.260986328125,
+        -238.0533447265625
+      ],
+      "min": [
+        -58.260986328125,
+        -249.05340576171875
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 3101328,
+      "componentType": 5125,
+      "count": 97728,
+      "type": "SCALAR"
+    }
+  ],
+  "asset": {
+    "extras": {
+      "author": "Ali Şahan Yalçın (https://sketchfab.com/alisahanyalcin)",
+      "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+      "source": "https://sketchfab.com/3d-models/pleated-skirt-1be1cb560a934bd5a4ef6051b90197dd",
+      "title": "Pleated Skirt"
+    },
+    "generator": "Sketchfab-15.53.0",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 3492240,
+      "name": "floatBufferViews",
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 2460272,
+      "byteOffset": 3492240,
+      "byteStride": 8,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 3928872,
+      "byteOffset": 5952512,
+      "byteStride": 12,
+      "name": "floatBufferViews",
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 9881384,
+      "uri": "scene.bin"
+    }
+  ],
+  "images": [
+    {
+      "uri": "textures/FABRIC_2_FRONT_5206_baseColor.jpeg"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "FABRIC_2_FRONT_5206",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.9826311700321614
+      }
+    },
+    {
+      "doubleSided": true,
+      "name": "FABRIC_1_FRONT_5199",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.9826311700321614
+      }
+    },
+    {
+      "doubleSided": true,
+      "name": "FABRIC_2_Copy_1_FRONT_5212",
+      "pbrMetallicRoughness": {
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.9826311700321614
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Pleated Skirt_FABRIC 2_FRONT_5206_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 1,
+            "POSITION": 0,
+            "TEXCOORD_0": 2,
+            "TEXCOORD_1": 3
+          },
+          "indices": 4,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Pleated Skirt_FABRIC 1_FRONT_5199_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 6,
+            "POSITION": 5,
+            "TEXCOORD_0": 7,
+            "TEXCOORD_1": 8
+          },
+          "indices": 9,
+          "material": 1,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Pleated Skirt_FABRIC 1_FRONT_5199_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 11,
+            "POSITION": 10,
+            "TEXCOORD_0": 12,
+            "TEXCOORD_1": 13
+          },
+          "indices": 14,
+          "material": 1,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Pleated Skirt_FABRIC 1_FRONT_5199_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 16,
+            "POSITION": 15,
+            "TEXCOORD_0": 17,
+            "TEXCOORD_1": 18
+          },
+          "indices": 19,
+          "material": 1,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Pleated Skirt_FABRIC 2 Copy 1_FRONT_5212_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 21,
+            "POSITION": 20,
+            "TEXCOORD_0": 22
+          },
+          "indices": 23,
+          "material": 2,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "children": [
+        1
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Sketchfab_model"
+    },
+    {
+      "children": [
+        2
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "f5b9eda532e547188d888f046343b8a1.fbx"
+    },
+    {
+      "children": [
+        3
+      ],
+      "name": "RootNode"
+    },
+    {
+      "children": [
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "matrix": [
+        10.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        10.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        10.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Pleated Skirt"
+    },
+    {
+      "mesh": 0,
+      "name": "Pleated Skirt_FABRIC 2_FRONT_5206_0"
+    },
+    {
+      "mesh": 1,
+      "name": "Pleated Skirt_FABRIC 1_FRONT_5199_0"
+    },
+    {
+      "mesh": 2,
+      "name": "Pleated Skirt_FABRIC 1_FRONT_5199_0"
+    },
+    {
+      "mesh": 3,
+      "name": "Pleated Skirt_FABRIC 1_FRONT_5199_0"
+    },
+    {
+      "mesh": 4,
+      "name": "Pleated Skirt_FABRIC 2 Copy 1_FRONT_5212_0"
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Sketchfab_Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    }
+  ]
+}
