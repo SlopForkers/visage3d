@@ -9,6 +9,7 @@ void Skeleton::bind(const Model& model) {
     size_t n = model.nodes.size();
     world_.assign(n, Mat4::identity());
     scaleOffset.assign(n, Vec3{1, 1, 1});
+    translateOffset.assign(n, Vec3{0, 0, 0});
 
     // Topological order: DFS from scene roots guarantees parents before children.
     order_.clear();
@@ -30,7 +31,8 @@ void Skeleton::update() {
     for (int i : order_) {
         const Node& node = m.nodes[i];
         Vec3 s = node.s * scaleOffset[i];
-        Mat4 local = Mat4::trs(node.t, node.r, s);
+        Vec3 t = node.t + translateOffset[i];
+        Mat4 local = Mat4::trs(t, node.r, s);
         world_[i] = (node.parent >= 0) ? world_[node.parent] * local : local;
     }
 }

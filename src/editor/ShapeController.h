@@ -1,13 +1,14 @@
 #pragma once
 #include "model/Model.h"
 #include "model/Skeleton.h"
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
 
 namespace ce {
 
-// A single editable shape parameter, either morph-driven or bone-scale-driven.
+// A single editable shape parameter, either morph-driven or bone-driven.
 struct ShapeParam {
     enum class Type { Morph, BoneScale };
     Type type;
@@ -19,10 +20,24 @@ struct ShapeParam {
     float defValue = 0.5f; // normalized default
     float value = 0.5f;    // normalized 0..1
 
-    // BoneScale specifics
-    std::vector<int> bones;   // affected node indices
-    Vec3 axes{1, 1, 1};       // per-axis exponent of the applied scale
-    bool compensate = false;  // invert the scale on direct children
+    // Bone-scale rules: each entry scales a set of bones around given axes
+    // (axes = per-axis exponent), optionally compensating direct children.
+    struct BoneRule {
+        std::vector<int> bones;
+        Vec3 axes{1, 1, 1};
+        bool compensate = false;
+    };
+    // Bone-translate rules: offset bones along an axis.
+    // scaleMode=false: offset = axis * factor * (value - defValue)
+    // scaleMode=true:  offset = axis * factor * (currentScale - 1)
+    struct TranslateRule {
+        std::vector<int> bones;
+        Vec3 axis{0, 1, 0};
+        float factor = 0.f;
+        bool scaleMode = false;
+    };
+    std::vector<BoneRule> rules;
+    std::vector<TranslateRule> translateRules;
 
     // Morph specifics
     int mesh = -1;
@@ -52,6 +67,7 @@ public:
     void setValues(const std::map<std::string, float>& v);
 
     bool morphsDirty = true; // renderer must re-upload morphed vertex data
+    uint64_t revision = 0;   // bumped on every apply() — for debounced clothing refit
 
 private:
     Model* model_ = nullptr;
@@ -60,8 +76,8 @@ private:
 
     void addBoneParamsFromRules(const std::string& configPath);
     void addMorphParams();
-    int findBone(const std::vector<std::string>& names,
-                 const std::vector<std::string>& patterns) const;
+    std::vector<int> matchBones(const std::vector<std::string>& names,
+                                const std::vector<std::string>& patterns) const;
     static std::string morphGroup(const std::string& morphName);
     static std::string morphLabel(const std::string& morphName);
 };

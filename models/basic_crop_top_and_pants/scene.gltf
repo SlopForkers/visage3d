@@ -1,0 +1,321 @@
+{
+  "accessors": [
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 7784,
+      "max": [
+        349.2221374511719,
+        94.19166564941406,
+        1424.818359375
+      ],
+      "min": [
+        -351.23211669921875,
+        -168.82627868652344,
+        124.24419403076172
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 93408,
+      "componentType": 5126,
+      "count": 7784,
+      "max": [
+        0.9999369978904724,
+        0.999962329864502,
+        0.9931167364120483
+      ],
+      "min": [
+        -0.9999488592147827,
+        -0.9998103380203247,
+        -0.9971222281455994
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 7784,
+      "max": [
+        0.9329259991645813,
+        1.4340720176696777
+      ],
+      "min": [
+        -0.44530901312828064,
+        -0.04705199971795082
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "componentType": 5125,
+      "count": 38280,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 186816,
+      "componentType": 5126,
+      "count": 7784,
+      "max": [
+        348.88153076171875,
+        93.69520568847656,
+        1424.5386962890625
+      ],
+      "min": [
+        -350.83160400390625,
+        -168.32798767089844,
+        124.32927703857422
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 280224,
+      "componentType": 5126,
+      "count": 7784,
+      "max": [
+        0.9999499917030334,
+        0.999809980392456,
+        0.992882490158081
+      ],
+      "min": [
+        -0.9999366402626038,
+        -0.9999626278877258,
+        -0.9931191205978394
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 62272,
+      "componentType": 5126,
+      "count": 7784,
+      "max": [
+        0.9329259991645813,
+        1.4340720176696777
+      ],
+      "min": [
+        -0.44530901312828064,
+        -0.04705199971795082
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 153120,
+      "componentType": 5125,
+      "count": 38280,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 373632,
+      "componentType": 5126,
+      "count": 19964,
+      "max": [
+        349.2713928222656,
+        94.19166564941406,
+        1424.9161376953125
+      ],
+      "min": [
+        -351.27044677734375,
+        -164.12747192382813,
+        124.04052734375
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 613200,
+      "componentType": 5126,
+      "count": 19964,
+      "max": [
+        0.9999998807907104,
+        0.9995772242546082,
+        0.9999356269836426
+      ],
+      "min": [
+        -0.9999998807907104,
+        -0.9998934864997864,
+        -0.9997533559799194
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 124544,
+      "componentType": 5126,
+      "count": 19964,
+      "max": [
+        0.9329259991645813,
+        1.4340720176696777
+      ],
+      "min": [
+        -0.44530901312828064,
+        -0.04705199971795082
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 306240,
+      "componentType": 5125,
+      "count": 100224,
+      "type": "SCALAR"
+    }
+  ],
+  "asset": {
+    "extras": {
+      "author": "pers (https://sketchfab.com/persnip)",
+      "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+      "source": "https://sketchfab.com/3d-models/basic-crop-top-and-pants-0c745443e1af4d30b4e965969c2722e1",
+      "title": "Basic Crop Top and Pants"
+    },
+    "generator": "Sketchfab-15.58.0",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 707136,
+      "name": "floatBufferViews",
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 284256,
+      "byteOffset": 707136,
+      "byteStride": 8,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 852768,
+      "byteOffset": 991392,
+      "byteStride": 12,
+      "name": "floatBufferViews",
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 1844160,
+      "uri": "scene.bin"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "FABRIC_1_FRONT_8158",
+      "pbrMetallicRoughness": {
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.6
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Object_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 1,
+            "POSITION": 0,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Object_1",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 5,
+            "POSITION": 4,
+            "TEXCOORD_0": 6
+          },
+          "indices": 7,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Object_2",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 9,
+            "POSITION": 8,
+            "TEXCOORD_0": 10
+          },
+          "indices": 11,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "children": [
+        1
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Sketchfab_model"
+    },
+    {
+      "children": [
+        2,
+        3,
+        4
+      ],
+      "name": "gym.obj.cleaner.materialmerger.gles"
+    },
+    {
+      "mesh": 0,
+      "name": "Object_2"
+    },
+    {
+      "mesh": 1,
+      "name": "Object_3"
+    },
+    {
+      "mesh": 2,
+      "name": "Object_4"
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Sketchfab_Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ]
+}

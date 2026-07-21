@@ -1,6 +1,10 @@
 file(REMOVE_RECURSE
   "CMakeFiles/character_editor.dir/src/app/Application.cpp.obj"
   "CMakeFiles/character_editor.dir/src/app/Application.cpp.obj.d"
+  "CMakeFiles/character_editor.dir/src/app/FileDialog.cpp.obj"
+  "CMakeFiles/character_editor.dir/src/app/FileDialog.cpp.obj.d"
+  "CMakeFiles/character_editor.dir/src/clothing/ClothingManager.cpp.obj"
+  "CMakeFiles/character_editor.dir/src/clothing/ClothingManager.cpp.obj.d"
   "CMakeFiles/character_editor.dir/src/core/GL.cpp.obj"
   "CMakeFiles/character_editor.dir/src/core/GL.cpp.obj.d"
   "CMakeFiles/character_editor.dir/src/editor/Presets.cpp.obj"

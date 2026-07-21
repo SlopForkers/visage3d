@@ -1,6 +1,8 @@
 #pragma once
+#include "clothing/ClothingManager.h"
 #include "editor/Presets.h"
 #include "editor/ShapeController.h"
+#include "json.hpp"
 #include "model/Model.h"
 #include "render/Camera.h"
 #include <functional>
@@ -10,21 +12,31 @@
 namespace ce {
 
 struct UICallbacks {
-    std::function<void(const std::string&)> openModel;      // path
+    std::function<void(const std::string&)> openModel;      // via native dialog
+    std::function<void(const std::string&)> openClothing;   // path (already chosen)
     std::function<void(const std::string&)> saveScreenshot; // path
     std::function<void()> resetCamera;
+    std::function<void(int)> refitClothing;    // refit + GPU re-upload
+    std::function<void(int)> padClothing;      // cheap padding update + upload
+    std::function<void(int)> removeClothing;   // remove slot + item
+    std::function<void(int, bool)> clothingVisible;
+    std::function<void(const nlohmann::json&)> applyClothingPreset;
 };
 
-// Fixed left-side ImGui panel: model info, body sliders, face sliders, presets.
+// Left panel with VRoid-style top tabs: Тело | Лицо | Причёска | Одежда | Пресеты | Вид.
 class EditorUI {
 public:
     ShapeController* controller = nullptr;
     Presets* presets = nullptr;
     Model* model = nullptr;
+    ClothingManager* clothing = nullptr;
     UICallbacks cb;
 
     bool showGrid = true;
     bool wireframe = false;
+    bool hairVisible = true;
+    float hairTint[3] = {1.f, 1.f, 1.f};
+    bool autoRefit = true; // debounced clothing refit on body-shape change
     std::string status; // last operation result (error or info)
 
     void draw(int winW, int winH, float fps);
@@ -32,14 +44,18 @@ public:
 
 private:
     char presetName_[128] = "default";
-    char openPath_[512] = "";
     std::vector<std::string> presetList_;
     bool presetListDirty_ = true;
 
-    void drawModelSection();
-    void drawParams();
-    void drawPresets();
+    void drawBodyTab();
+    void drawFaceTab();
+    void drawHairTab();
+    void drawClothingTab();
+    void drawPresetsTab();
+    void drawViewTab();
     void drawParamSlider(ShapeParam& p);
+    void drawMorphGroups();
+    nlohmann::json clothingToJson() const;
 };
 
 } // namespace ce

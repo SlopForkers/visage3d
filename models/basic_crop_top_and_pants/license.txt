@@ -1,0 +1,11 @@
+Model Information:
+* title:	Basic Crop Top and Pants
+* source:	https://sketchfab.com/3d-models/basic-crop-top-and-pants-0c745443e1af4d30b4e965969c2722e1
+* author:	pers (https://sketchfab.com/persnip)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Basic Crop Top and Pants" (https://sketchfab.com/3d-models/basic-crop-top-and-pants-0c745443e1af4d30b4e965969c2722e1) by pers (https://sketchfab.com/persnip) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

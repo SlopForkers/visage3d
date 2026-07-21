@@ -1,12 +1,15 @@
 #pragma once
+#include "clothing/ClothingManager.h"
 #include "editor/Presets.h"
 #include "editor/ShapeController.h"
+#include "json.hpp"
 #include "model/GltfLoader.h"
 #include "model/Skeleton.h"
 #include "render/Camera.h"
 #include "render/ModelRenderer.h"
 #include "ui/EditorUI.h"
 #include <string>
+#include <vector>
 
 struct GLFWwindow;
 
@@ -26,6 +29,12 @@ private:
     Camera camera_;
     EditorUI ui_;
     Presets presets_;
+    ClothingManager clothing_;
+    int bodySlot_ = -1;
+
+    // debounced clothing refit on body-shape change
+    uint64_t seenRevision_ = 0;
+    double refitAt_ = 0.0;
 
     // CLI options
     std::string optModel_ = "female_base.vrm";
@@ -37,8 +46,9 @@ private:
     float optDist_ = 0.f;   // initial camera distance (0 = default)
     float optTargetY_ = 0.f; // camera target height (0 = default)
     std::vector<std::pair<std::string, float>> optSet_; // --set id=value overrides
+    std::vector<std::string> optClothes_;               // --clothe path
+    bool listParams_ = false;                           // --listparams debug
 
-    bool headlessScreenshot_ = false;
     std::string pendingScreenshot_;
 
     bool loadModel(const std::string& path);
@@ -46,6 +56,15 @@ private:
     void saveScreenshot(const std::string& path);
     void resetCamera();
     void handleInput(float dt);
+
+    // clothing pipeline (UI callbacks)
+    void addClothing(const std::string& path);
+    void refitClothing(int index);
+    void padClothing(int index);
+    void removeClothing(int index);
+    void setClothingVisible(int index, bool visible);
+    void applyClothingPreset(const nlohmann::json& items);
+    void clearClothing();
 };
 
 } // namespace ce

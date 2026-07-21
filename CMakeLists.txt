@@ -38,7 +38,7 @@ target_include_directories(character_editor PRIVATE
     src
     external/tinygltf
 )
-target_link_libraries(character_editor PRIVATE imgui glfw opengl32)
+target_link_libraries(character_editor PRIVATE imgui glfw opengl32 comdlg32)
 
 if(MINGW)
     target_compile_options(character_editor PRIVATE -Wno-unused-parameter)

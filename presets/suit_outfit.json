@@ -1,0 +1,16 @@
+{
+  "model": "female_base.vrm",
+  "values": {
+    "breast_size": 0.75,
+    "waist_size": 0.3
+  },
+  "clothing": [
+    {
+      "path": "models/pleated_skirt/scene.gltf",
+      "fitScale": 0.001,
+      "fitOffset": [0.009, 0.0, 0.059],
+      "padding": 0.008,
+      "visible": true
+    }
+  ]
+}
