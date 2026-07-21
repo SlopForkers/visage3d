@@ -1,0 +1,8 @@
+{
+  "model": "female_base.vrm",
+  "values": {
+    "breast_size": 0.65,
+    "morph.Fcl_ALL_Joy": 1.0,
+    "morph.Fcl_MTH_Smile": 1.0
+  }
+}

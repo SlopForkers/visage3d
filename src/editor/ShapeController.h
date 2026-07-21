@@ -1,0 +1,69 @@
+#pragma once
+#include "model/Model.h"
+#include "model/Skeleton.h"
+#include <map>
+#include <string>
+#include <vector>
+
+namespace ce {
+
+// A single editable shape parameter, either morph-driven or bone-scale-driven.
+struct ShapeParam {
+    enum class Type { Morph, BoneScale };
+    Type type;
+    std::string id;    // stable id used in presets, e.g. "breast_size" / "morph.Fcl_EYE_Joy"
+    std::string name;  // UI label
+    std::string group; // UI group (collapsing header)
+    float minS = 0.f;  // BoneScale: scale at value 0   | Morph: weight at value 0 (0)
+    float maxS = 1.f;  // BoneScale: scale at value 1   | Morph: weight at value 1 (1)
+    float defValue = 0.5f; // normalized default
+    float value = 0.5f;    // normalized 0..1
+
+    // BoneScale specifics
+    std::vector<int> bones;   // affected node indices
+    Vec3 axes{1, 1, 1};       // per-axis exponent of the applied scale
+    bool compensate = false;  // invert the scale on direct children
+
+    // Morph specifics
+    int mesh = -1;
+    int morphTarget = -1;
+};
+
+// Owns the parameter set of a loaded model, auto-detects body parameters
+// (breast / buttocks / hips / waist) from bone names, exposes every morph
+// target as a slider, and applies values to the model + skeleton.
+class ShapeController {
+public:
+    void bind(Model& model, Skeleton& skeleton);
+
+    // (Re)builds the parameter list. Tries config/body_params.json first,
+    // falls back to built-in rules. Resets values to defaults.
+    void scan(const std::string& configPath = "config/body_params.json");
+
+    void apply(); // push values into model morph weights + skeleton scale offsets
+
+    std::vector<ShapeParam>& params() { return params_; }
+    ShapeParam* find(const std::string& id);
+    void setValue(const std::string& id, float v);
+    void resetAll();
+
+    // Preset values as id -> normalized value.
+    std::map<std::string, float> values() const;
+    void setValues(const std::map<std::string, float>& v);
+
+    bool morphsDirty = true; // renderer must re-upload morphed vertex data
+
+private:
+    Model* model_ = nullptr;
+    Skeleton* skeleton_ = nullptr;
+    std::vector<ShapeParam> params_;
+
+    void addBoneParamsFromRules(const std::string& configPath);
+    void addMorphParams();
+    int findBone(const std::vector<std::string>& names,
+                 const std::vector<std::string>& patterns) const;
+    static std::string morphGroup(const std::string& morphName);
+    static std::string morphLabel(const std::string& morphName);
+};
+
+} // namespace ce

@@ -1,0 +1,49 @@
+{
+  "comment": "Правила авто-определения параметров тела. bones — точные имена костей, patterns — regex для других моделей. axes — показатель степени масштаба по осям XYZ. compensate — компенсировать масштаб на дочерних костях.",
+  "boneParams": [
+    {
+      "id": "breast_size",
+      "name": "Размер груди",
+      "group": "Тело",
+      "bones": ["J_Sec_L_Bust1", "J_Sec_R_Bust1"],
+      "patterns": ["(?i)(bust|breast)_?[lr]?_?1$", "(?i)^mune_[lr]$"],
+      "min": 0.5,
+      "max": 1.8,
+      "axes": [1.0, 1.0, 1.0],
+      "compensate": false
+    },
+    {
+      "id": "buttocks_size",
+      "name": "Размер ягодиц",
+      "group": "Тело",
+      "bones": ["J_Bip_C_Hips"],
+      "patterns": ["(?i)^(hips|pelvis)$", "(?i)(hips|pelvis)$"],
+      "min": 0.6,
+      "max": 1.6,
+      "axes": [0.6, 0.35, 1.0],
+      "compensate": true
+    },
+    {
+      "id": "hip_width",
+      "name": "Ширина бёдер",
+      "group": "Тело",
+      "bones": ["J_Bip_C_Hips"],
+      "patterns": ["(?i)^(hips|pelvis)$", "(?i)(hips|pelvis)$"],
+      "min": 0.8,
+      "max": 1.4,
+      "axes": [1.0, 0.1, 0.25],
+      "compensate": true
+    },
+    {
+      "id": "waist_size",
+      "name": "Талия",
+      "group": "Тело",
+      "bones": ["J_Bip_C_Spine"],
+      "patterns": ["(?i)spine_?1?$", "(?i)^(spine|waist)$"],
+      "min": 0.75,
+      "max": 1.35,
+      "axes": [1.0, 0.0, 1.0],
+      "compensate": true
+    }
+  ]
+}
