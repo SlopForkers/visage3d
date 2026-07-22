@@ -438,6 +438,9 @@ int Application::run() {
         }
         renderer_.hideHair = !ui_.hairVisible;
         renderer_.hairTint = Vec4{ui_.hairTint[0], ui_.hairTint[1], ui_.hairTint[2], 1.f};
+        renderer_.toonShading = ui_.toonShading;
+        renderer_.outlineEnabled = ui_.outline;
+        renderer_.outlineWidth = ui_.outlineWidth;
 
         // debounced clothing refit (fits adapt to the new body shape)
         if (controller_.revision != seenRevision_) {
@@ -461,7 +464,7 @@ int Application::run() {
 
         if (ui_.showGrid) renderer_.drawGrid(camera_, aspect);
         if (renderer_.hasModel())
-            renderer_.draw(skeleton_, model_, camera_, aspect, ui_.wireframe);
+            renderer_.draw(skeleton_, model_, camera_, aspect, ui_.wireframe, winW, winH);
 
         // screenshot of the pure 3D scene (before UI is drawn)
         if (!pendingScreenshot_.empty()) {

@@ -38,6 +38,9 @@ public:
 
     bool showGrid = true;
     bool wireframe = false;
+    bool toonShading = true;  // cel shading + rim (anime look)
+    bool outline = true;      // inverted-hull contour
+    float outlineWidth = 2.f; // px
     bool hairVisible = true;
     float hairTint[3] = {1.f, 1.f, 1.f};
     bool autoRefit = true; // debounced clothing refit on body-shape change

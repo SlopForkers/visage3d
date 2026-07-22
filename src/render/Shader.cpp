@@ -57,6 +57,9 @@ void Shader::setMat4(const char* name, const Mat4& m) const {
 void Shader::setMat3(const char* name, const Mat3& m) const {
     glUniformMatrix3fv(loc(name), 1, GL_FALSE, m.m);
 }
+void Shader::setVec2(const char* name, const Vec2& v) const {
+    glUniform2f(loc(name), v.x, v.y);
+}
 void Shader::setVec3(const char* name, const Vec3& v) const {
     glUniform3f(loc(name), v.x, v.y, v.z);
 }

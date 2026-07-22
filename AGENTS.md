@@ -25,7 +25,16 @@ CLI: `[model] [--model p] [--preset name] [--screenshot out.png] [--frames N] [-
 - `src/model/` — `Model.h` (рендер-независимые данные), `GltfLoader` (tinygltf; .vrm/.glb определяются по магии `glTF`), `Skeleton` (мировые матрицы узлов, per-node scale+translate offsets).
 - `src/editor/` — `ShapeController` (параметры тела/лица/морфов), `Presets` (JSON в `presets/`).
 - `src/clothing/` — `ClothingManager`: автоподгонка и автоскиннинг одежды (см. ниже).
-- `src/render/` — `Shader`, `Camera` (орбитальная), `ModelRenderer` (мульти-модель по слотам: слот 0 = тело, остальные = одежда; GPU-скиннинг до 80 костей; 2 прохода opaque/mask → blend; sRGB; флаги волос `hideHair`/`hairTint`).
+- `src/render/` — `Shader`, `Camera` (орбитальная), `ModelRenderer` (мульти-модель по слотам:
+  слот 0 = тело, остальные = одежда; GPU-скиннинг до 80 костей; проходы: контур → opaque/mask →
+  blend; sRGB; флаги волос `hideHair`/`hairTint`). **Аниме-рендер**: тун-шейдинг в `kModelFS`
+  (2 мягко-квантованные полосы через `fwidth`, холодный оттенок тени `vec3(0.66,0.64,0.78)`,
+  rim-свет по освещённой стороне; `uToon`) и inverted-hull контур (`kOutlineVS/FS`: выдавливание
+  по проецированной нормали на постоянную экранную толщину в px через `uWinSize`, цвет контура ×
+  альбедо, alpha-test как у основного прохода, blend-примитивы пропускаются, рисуется с
+  `glCullFace(GL_FRONT)` до основных проходов). Управление — вкладка «Вид» («Тун-шейдинг»,
+  «Контур», толщина px), флаги в `ModelRenderer`: `toonShading`, `outlineEnabled`, `outlineWidth`,
+  `outlineColor`.
 - `src/ui/` — `EditorUI` (левая панель 340px, вкладки сверху как в VRoid: **Тело | Лицо | Причёска | Одежда | Пресеты | Вид**, русский UI, кириллица из segoeui/arial).
 - `src/app/` — `Application` (окно GLFW, цикл, drag&drop, скриншоты, debounced авто-подгонка), `FileDialog` (Win32 GetOpenFileNameW).
 
@@ -111,7 +120,8 @@ UI одежды: слоты (снять/выбрать), каталог, вид�
 - Ограничения: экстремальные формы (грудь ×1.8) могут не покрываться чужой одеждой
   (ткани физически не хватает) — решается слайдерами «Масштаб/Обтяжка/Отступ»;
   A-поза рукавов у источника vs T-поза тела — искажение рукавов при анимации;
-  `COLOR_0`, spring bones, MToon shade/rim/outline не поддерживаются.
+  `COLOR_0`, spring bones не поддерживаются; MToon-параметры материалов не читаются —
+  тун-шейдинг и контур свои, приближённые.
 - Пресеты v2: `{"model", "values": {id: 0..1}, "clothing": [{path, fitScale, fitOffset,
   padding, shrink, visible, type, slot, fitRot}]}`.
 

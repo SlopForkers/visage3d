@@ -437,6 +437,15 @@ void EditorUI::drawViewTab() {
     ImGui::Checkbox("Сетка", &showGrid);
     ImGui::Checkbox("Каркас", &wireframe);
     ImGui::Spacing();
+    ImGui::TextDisabled("Аниме-рендер");
+    ImGui::Checkbox("Тун-шейдинг", &toonShading);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Ступенчатые тени с холодным оттенком + контровый свет");
+    ImGui::Checkbox("Контур", &outline);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Чёрный контур постоянной толщины (inverted hull)");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::SliderFloat("Толщина контура", &outlineWidth, 0.5f, 6.f, "%.1f px");
+    ImGui::Spacing();
     if (ImGui::Button("Сброс камеры", ImVec2(-1, 0)))
         if (cb.resetCamera) cb.resetCamera();
     if (ImGui::Button("Сохранить скриншот", ImVec2(-1, 0)))
