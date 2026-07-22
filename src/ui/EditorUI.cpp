@@ -81,6 +81,14 @@ void EditorUI::drawParamSlider(ShapeParam& p) {
         char buf[64];
         std::snprintf(buf, sizeof(buf), "x%.2f", s);
         label += "  " + std::string(buf);
+    } else if (p.type == ShapeParam::Type::VertexEffect) {
+        float s = p.minS + (p.maxS - p.minS) * p.value;
+        char buf[64];
+        if (p.effect == ShapeParam::Effect::Tint)
+            std::snprintf(buf, sizeof(buf), "%.0f%%", s * 100.f);
+        else
+            std::snprintf(buf, sizeof(buf), "%.1f мм", s * 1000.f);
+        label += "  " + std::string(buf);
     }
     ImGui::TextUnformatted(label.c_str());
     ImGui::SetNextItemWidth(-34.f);
@@ -100,6 +108,20 @@ void EditorUI::drawBodyTab() {
     ImGui::Spacing();
     for (ShapeParam& p : controller->params())
         if (p.group == "Тело" || p.group == "Body") drawParamSlider(p);
+
+    // ---- vertex effectors: nipples / areolas ----
+    bool hasNip = false;
+    for (ShapeParam& p : controller->params())
+        if (p.type == ShapeParam::Type::VertexEffect) { hasNip = true; break; }
+    if (hasNip) {
+        ImGui::Separator();
+        ImGui::TextDisabled("Соски");
+        for (ShapeParam& p : controller->params())
+            if (p.type == ShapeParam::Type::VertexEffect) drawParamSlider(p);
+        ImGui::ColorEdit3("Цвет ореолы", areolaColor);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Оттенок области ореолы (работает при «Затемнение» > 0)");
+    }
 }
 
 void EditorUI::drawFaceTab() {

@@ -434,6 +434,12 @@ int Application::run() {
         skeleton_.update();
         if (controller_.morphsDirty) {
             renderer_.syncVertices(bodySlot_);
+            if (controller_.hasEffectors()) {
+                // vertex effectors run after the morph re-blend (they rewrite
+                // displaced vertices from stored bind bases)
+                controller_.applyEffectorsToMesh();
+                renderer_.reupload(bodySlot_);
+            }
             controller_.morphsDirty = false;
         }
         renderer_.hideHair = !ui_.hairVisible;
@@ -441,6 +447,11 @@ int Application::run() {
         renderer_.toonShading = ui_.toonShading;
         renderer_.outlineEnabled = ui_.outline;
         renderer_.outlineWidth = ui_.outlineWidth;
+        // areola tint follows the skeleton + effector params
+        renderer_.areolaStrength = controller_.effectorValue(ShapeParam::Effect::Tint);
+        renderer_.areolaRadius = controller_.effectorValue(ShapeParam::Effect::AreolaRadius);
+        renderer_.areolaColor = Vec3{ui_.areolaColor[0], ui_.areolaColor[1], ui_.areolaColor[2]};
+        for (int i = 0; i < 2; ++i) renderer_.areolaAnchors[i] = controller_.effectorAnchorWorld(i);
 
         // debounced clothing refit (fits adapt to the new body shape)
         if (controller_.revision != seenRevision_) {

@@ -55,6 +55,10 @@ uniform int uUnlit;
 uniform int uToon;
 uniform vec3 uLightDir;
 uniform vec3 uCamPos;
+uniform vec3 uAreolaPos[2];
+uniform float uAreolaRadius;
+uniform vec3 uAreolaColor;
+uniform float uAreolaStrength;
 
 void main() {
     vec4 c = uBaseColor;
@@ -62,6 +66,14 @@ void main() {
     if (uAlphaMode == 1 && c.a < uCutoff) discard;
 
     vec3 col = c.rgb;
+    // areola tint: soft radial darkening around the anchor (body slot only)
+    if (uAreolaStrength > 0.001 && uAreolaRadius > 0.001) {
+        for (int i = 0; i < 2; ++i) {
+            float d = distance(vPos, uAreolaPos[i]);
+            float t = (1.0 - smoothstep(uAreolaRadius * 0.5, uAreolaRadius, d)) * uAreolaStrength;
+            col = mix(col, col * uAreolaColor, t);
+        }
+    }
     if (uUnlit == 0) {
         vec3 N = normalize(vNrm);
         if (!gl_FrontFacing) N = -N;
@@ -390,6 +402,16 @@ void ModelRenderer::syncVertices(int slotId) {
     }
 }
 
+void ModelRenderer::reupload(int slotId) {
+    if (slotId < 0 || slotId >= static_cast<int>(slots_.size())) return;
+    GpuModelData& slot = slots_[slotId];
+    if (!slot.model) return;
+    Model& model = *slot.model;
+    for (size_t mi = 0; mi < model.meshes.size() && mi < slot.meshes.size(); ++mi)
+        for (size_t pi = 0; pi < model.meshes[mi].prims.size(); ++pi)
+            uploadVertices(slot.meshes[mi].prims[pi], model.meshes[mi].prims[pi]);
+}
+
 void ModelRenderer::releaseSlot(GpuModelData& slot) {
     for (GpuMesh& gm : slot.meshes)
         for (GpuPrim& gp : gm.prims) {
@@ -500,6 +522,9 @@ void ModelRenderer::drawSlot(GpuModelData& slot, const Skeleton& skeleton,
     // Clothing slots: vertices are in body bind space and index the body skin.
     const Model& skinModel = (slot.forceSkin >= 0) ? bodyModel : model;
 
+    // areola tint applies to bare body only, never to clothing
+    modelShader_.setFloat("uAreolaStrength", slot.forceSkin >= 0 ? 0.f : areolaStrength);
+
     for (const MeshInstance& inst : model.meshInstances) {
         if (inst.mesh < 0 || inst.mesh >= static_cast<int>(slot.meshes.size())) continue;
         const GpuMesh& gm = slot.meshes[inst.mesh];
@@ -605,6 +630,10 @@ void ModelRenderer::draw(const Skeleton& skeleton, const Model& bodyModel, const
     modelShader_.setVec3("uLightDir", Vec3{0.5f, 0.9f, 0.7f}.normalized());
     modelShader_.setVec3("uCamPos", camera.eye());
     modelShader_.setInt("uToon", toonShading ? 1 : 0);
+    modelShader_.setVec3("uAreolaPos[0]", areolaAnchors[0]);
+    modelShader_.setVec3("uAreolaPos[1]", areolaAnchors[1]);
+    modelShader_.setFloat("uAreolaRadius", areolaRadius);
+    modelShader_.setVec3("uAreolaColor", areolaColor);
 
     if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 

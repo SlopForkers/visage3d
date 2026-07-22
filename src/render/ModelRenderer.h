@@ -41,8 +41,17 @@ public:
 
     // Re-blends morphs (if any) and re-uploads vertex data of a slot.
     void syncVertices(int slot);
+    // Re-uploads pos/normal of a slot WITHOUT morph blending (the caller
+    // already wrote blendedPos/blendedNormal — e.g. vertex effectors).
+    void reupload(int slot);
     // Re-uploads uv/joints/weights of a slot (after weight transfer).
     void syncStatic(int slot);
+
+    // Areola tint (applied to the body slot only; anchors in world space).
+    float areolaStrength = 0.f;
+    float areolaRadius = 0.03f;
+    Vec3 areolaColor{0.72f, 0.45f, 0.42f};
+    Vec3 areolaAnchors[2] = {{0.f, -1000.f, 0.f}, {0.f, -1000.f, 0.f}};
 
     void draw(const Skeleton& skeleton, const Model& bodyModel, const Camera& camera,
               float aspect, bool wireframe, int winW, int winH);
