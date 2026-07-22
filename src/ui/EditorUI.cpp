@@ -82,6 +82,14 @@ void EditorUI::drawParamSlider(ShapeParam& p) {
         else
             std::snprintf(buf, sizeof(buf), "%.1f мм", s * 1000.f);
         label += "  " + std::string(buf);
+    } else if (p.type == ShapeParam::Type::VertexDeform) {
+        float s = p.minS + (p.maxS - p.minS) * p.value;
+        char buf[64];
+        if (p.deformKind == ShapeParam::DeformKind::Scale)
+            std::snprintf(buf, sizeof(buf), "x%.2f", s);
+        else
+            std::snprintf(buf, sizeof(buf), "%+.1f мм", s * 1000.f);
+        label += "  " + std::string(buf);
     }
     ImGui::TextUnformatted(label.c_str());
     ImGui::SetNextItemWidth(-34.f);
@@ -134,16 +142,39 @@ void EditorUI::drawBodyTab() {
 
 void EditorUI::drawFaceTab() {
     if (!controller) return;
+
+    // ---- face shape: region deforms (Глаза / Нос / Рот) ----
+    {
+        std::vector<std::string> order;
+        std::map<std::string, std::vector<ShapeParam*>> groups;
+        for (ShapeParam& p : controller->params()) {
+            if (p.type != ShapeParam::Type::VertexDeform) continue;
+            if (groups.find(p.group) == groups.end()) order.push_back(p.group);
+            groups[p.group].push_back(&p);
+        }
+        for (const std::string& g : order) {
+            if (ImGui::TreeNodeEx(g.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (ShapeParam* p : groups[g]) drawParamSlider(*p);
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    // ---- head bone params (head size) ----
     bool hasFaceBones = false;
     for (ShapeParam& p : controller->params())
         if (p.type == ShapeParam::Type::BoneScale && (p.group == "Лицо" || p.group == "Face")) {
-            if (!hasFaceBones) {
-                ImGui::TextDisabled("Форма");
-                hasFaceBones = true;
-            }
-            drawParamSlider(p);
+            hasFaceBones = true;
+            break;
         }
-    if (hasFaceBones) ImGui::Separator();
+    if (hasFaceBones && ImGui::TreeNode("Голова")) {
+        for (ShapeParam& p : controller->params())
+            if (p.type == ShapeParam::Type::BoneScale && (p.group == "Лицо" || p.group == "Face"))
+                drawParamSlider(p);
+        ImGui::TreePop();
+    }
+
+    // ---- expression morphs library ----
     drawMorphGroups();
 }
 

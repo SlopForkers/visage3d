@@ -51,6 +51,48 @@ const char* kBuiltinRules = R"json({
       "kind": "bulge", "min": 0.0, "max": 0.012 },
     { "id": "areola_tint", "name": "Ореола: затемнение", "group": "Соски",
       "kind": "tint", "min": 0.0, "max": 1.0 }
+  ],
+
+  "deformAnchors": {
+    "eye_l": { "bones": ["J_Adj_L_FaceEye"],
+               "patterns": ["(?i)l_?face_?eye$", "(?i)eye_?l$", "(?i)left_?eye$"] },
+    "eye_r": { "bones": ["J_Adj_R_FaceEye"],
+               "patterns": ["(?i)r_?face_?eye$", "(?i)eye_?r$", "(?i)right_?eye$"] },
+    "mouth": { "material": ["(?i)facemouth", "(?i)mouth"] },
+    "nose":  { "material": ["(?i)face_?00_?skin", "(?i)face.*skin"], "extreme": [0.0, 0.0, 1.0] }
+  },
+  "deformParams": [
+    { "id": "eye_size", "name": "Размер глаз", "group": "Глаза",
+      "anchors": ["eye_l", "eye_r"], "kind": "scale", "axis": [1.0, 1.0, 1.0],
+      "radius": 0.04, "min": 0.8, "max": 1.25 },
+    { "id": "eye_spacing", "name": "Расстояние глаз", "group": "Глаза",
+      "anchors": ["eye_l", "eye_r"], "kind": "translate",
+      "axis": [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+      "radius": 0.04, "min": -0.006, "max": 0.006 },
+    { "id": "eye_height", "name": "Высота глаз", "group": "Глаза",
+      "anchors": ["eye_l", "eye_r"], "kind": "translate", "axis": [0.0, 1.0, 0.0],
+      "radius": 0.04, "min": -0.006, "max": 0.006 },
+    { "id": "nose_size", "name": "Размер носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "scale", "axis": [1.0, 1.0, 1.0],
+      "radius": 0.03, "min": 0.75, "max": 1.35 },
+    { "id": "nose_length", "name": "Длина носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "translate", "axis": [0.0, 0.0, 1.0],
+      "radius": 0.028, "min": -0.004, "max": 0.01 },
+    { "id": "nose_height", "name": "Высота носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "translate", "axis": [0.0, 1.0, 0.0],
+      "radius": 0.028, "min": -0.005, "max": 0.005 },
+    { "id": "nose_width", "name": "Ширина носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "scale", "axis": [1.0, 0.0, 0.0],
+      "radius": 0.03, "min": 0.7, "max": 1.5 },
+    { "id": "mouth_width", "name": "Ширина рта", "group": "Рот",
+      "anchors": ["mouth"], "kind": "scale", "axis": [1.0, 0.0, 0.0],
+      "radius": 0.032, "min": 0.7, "max": 1.4 },
+    { "id": "mouth_height", "name": "Высота рта", "group": "Рот",
+      "anchors": ["mouth"], "kind": "translate", "axis": [0.0, 1.0, 0.0],
+      "radius": 0.03, "min": -0.005, "max": 0.005 },
+    { "id": "mouth_size", "name": "Размер рта", "group": "Рот",
+      "anchors": ["mouth"], "kind": "scale", "axis": [1.0, 1.0, 1.0],
+      "radius": 0.032, "min": 0.8, "max": 1.3 }
   ]
 })json";
 
@@ -68,7 +110,9 @@ void ShapeController::scan(const std::string& configPath) {
     for (float& f : effLast_) f = -1.f;
     addBoneParamsFromRules(configPath);
     addEffectorParams(configPath);
+    addDeformParams(configPath);
     addMorphParams();
+    deformLast_.assign(params_.size(), -1.f);
     apply();
     morphsDirty = true;
 }
@@ -362,6 +406,190 @@ void ShapeController::buildEffectorAnchors(const std::vector<std::string>& names
     }
 }
 
+// ---- vertex deforms (face editor: eyes / nose / mouth) ----
+
+void ShapeController::addDeformParams(const std::string& configPath) {
+    nlohmann::json rules;
+    {
+        std::ifstream f(configPath);
+        if (f) {
+            try { rules = nlohmann::json::parse(f); }
+            catch (...) { rules = nlohmann::json::object(); }
+        }
+    }
+    nlohmann::json builtin = nlohmann::json::parse(kBuiltinRules);
+    if (!rules.contains("deformAnchors") && builtin.contains("deformAnchors"))
+        rules["deformAnchors"] = builtin["deformAnchors"];
+    if (!rules.contains("deformParams") && builtin.contains("deformParams"))
+        rules["deformParams"] = builtin["deformParams"];
+    if (!rules.contains("deformAnchors") || !rules.contains("deformParams")) return;
+
+    buildDeformAnchors(rules["deformAnchors"]);
+    addDeformParamsFromJson(rules["deformParams"]);
+}
+
+void ShapeController::buildDeformAnchors(const nlohmann::json& anchorsJson) {
+    if (!model_ || !skeleton_ || !anchorsJson.is_object()) return;
+    skeleton_->update(); // world = bind pose right after bind()
+    constexpr float kMaxRadius = 0.09f; // hard cap of the affected region (m)
+
+    auto materialMatches = [](const std::string& name, const std::vector<std::string>& pats) {
+        for (const std::string& p : pats) {
+            try {
+                if (std::regex_search(name, std::regex(p))) return true;
+            } catch (...) { /* bad regex: no match */ }
+        }
+        return false;
+    };
+
+    for (auto it = anchorsJson.begin(); it != anchorsJson.end(); ++it) {
+        const nlohmann::json& spec = it.value();
+        DeformAnchor a;
+        a.id = it.key();
+        bool havePos = false;
+
+        if (spec.contains("bones") || spec.contains("patterns")) {
+            // anchor = bind position of the named bone (e.g. eye bones)
+            std::vector<std::string> names, patterns;
+            readNamesPatterns(spec, names, patterns);
+            std::vector<int> bones = matchBones(names, patterns);
+            if (!bones.empty()) {
+                const Mat4& wm = skeleton_->world()[bones.front()];
+                a.pos = {wm.m[12], wm.m[13], wm.m[14]};
+                havePos = true;
+            }
+        } else if (spec.contains("material")) {
+            // anchor = centroid (or extreme vertex along "extreme" dir) of the
+            // verts of prims whose material matches (e.g. mouth / nose tip)
+            std::vector<std::string> pats;
+            const nlohmann::json& m = spec["material"];
+            if (m.is_string())
+                pats.push_back(m.get<std::string>());
+            else
+                for (const auto& s : m) pats.push_back(s.get<std::string>());
+            Vec3 dir = readVec3(spec, "extreme", Vec3{0, 0, 0});
+            const bool useExtreme = dir.length() > 0.5f;
+            Vec3 sum{0, 0, 0}, nsum{0, 0, 0};
+            size_t cnt = 0;
+            float bestD = -1e30f;
+            for (const Mesh& mesh : model_->meshes)
+                for (const Primitive& prim : mesh.prims) {
+                    if (prim.material < 0 ||
+                        prim.material >= static_cast<int>(model_->materials.size()))
+                        continue;
+                    if (!materialMatches(model_->materials[prim.material].name, pats))
+                        continue;
+                    for (size_t v = 0; v < prim.pos.size(); ++v) {
+                        if (useExtreme) {
+                            float d = prim.pos[v].dot(dir);
+                            if (d > bestD) {
+                                bestD = d;
+                                a.pos = prim.pos[v];
+                                a.nrm = v < prim.normal.size() ? prim.normal[v]
+                                                               : Vec3{0, 0, 1};
+                            }
+                        } else {
+                            sum += prim.pos[v];
+                            nsum += v < prim.normal.size() ? prim.normal[v] : Vec3{0, 0, 1};
+                            ++cnt;
+                        }
+                    }
+                }
+            if (useExtreme)
+                havePos = bestD > -1e29f;
+            else if (cnt > 0) {
+                a.pos = sum * (1.f / static_cast<float>(cnt));
+                a.nrm = nsum.length() > 1e-7f ? nsum.normalized() : Vec3{0, 0, 1};
+                havePos = true;
+            }
+        }
+        if (!havePos) continue;
+
+        // affected verts: everything within the hard radius (all meshes —
+        // iris/white/highlight/eyeline/skin move together, nothing detaches),
+        // except hair materials
+        for (size_t mi = 0; mi < model_->meshes.size(); ++mi)
+            for (size_t pi = 0; pi < model_->meshes[mi].prims.size(); ++pi) {
+                const Primitive& prim = model_->meshes[mi].prims[pi];
+                if (prim.material >= 0 &&
+                    prim.material < static_cast<int>(model_->materials.size())) {
+                    const std::string& mn = model_->materials[prim.material].name;
+                    if (mn.find("HAIR") != std::string::npos ||
+                        mn.find("Hair") != std::string::npos)
+                        continue;
+                }
+                for (size_t v = 0; v < prim.pos.size(); ++v) {
+                    Vec3 dv = prim.pos[v] - a.pos;
+                    float d2 = dv.dot(dv);
+                    if (d2 > kMaxRadius * kMaxRadius) continue;
+                    DeformAnchor::V vv;
+                    vv.mesh = static_cast<int>(mi);
+                    vv.prim = static_cast<int>(pi);
+                    vv.vert = static_cast<int>(v);
+                    vv.d = std::sqrt(d2);
+                    vv.toVert = dv;
+                    a.verts.push_back(vv);
+                }
+            }
+        if (!a.verts.empty()) deformAnchors_.push_back(std::move(a));
+    }
+}
+
+void ShapeController::addDeformParamsFromJson(const nlohmann::json& arr) {
+    auto anchorIdx = [&](const std::string& id) -> int {
+        for (size_t i = 0; i < deformAnchors_.size(); ++i)
+            if (deformAnchors_[i].id == id) return static_cast<int>(i);
+        return -1;
+    };
+    for (const auto& r : arr) {
+        ShapeParam p;
+        p.type = ShapeParam::Type::VertexDeform;
+        p.id = r.value("id", std::string{});
+        p.name = r.value("name", p.id);
+        p.group = r.value("group", std::string{"Лицо"});
+        const std::string kind = r.value("kind", std::string{"translate"});
+        p.deformKind = kind == "scale" ? ShapeParam::DeformKind::Scale
+                     : kind == "protrude" ? ShapeParam::DeformKind::Protrude
+                                          : ShapeParam::DeformKind::Translate;
+        p.minS = r.value("min", 0.f);
+        p.maxS = r.value("max", 1.f);
+        p.deformRadius = r.value("radius", 0.03f);
+
+        if (r.contains("anchors"))
+            for (const auto& an : r["anchors"]) {
+                int ai = anchorIdx(an.get<std::string>());
+                if (ai >= 0) p.deformAnchors.push_back(ai);
+            }
+        if (r.contains("axis")) {
+            const nlohmann::json& ax = r["axis"];
+            const bool nested = ax.is_array() && !ax.empty() && ax[0].is_array();
+            if (nested) {
+                for (const auto& one : ax)
+                    if (one.size() == 3)
+                        p.deformAxes.push_back({one[0].get<float>(), one[1].get<float>(),
+                                                one[2].get<float>()});
+            } else if (ax.size() == 3) {
+                p.deformAxes.push_back(
+                    {ax[0].get<float>(), ax[1].get<float>(), ax[2].get<float>()});
+            }
+        }
+        if (p.deformAxes.empty())
+            p.deformAxes.push_back(p.deformKind == ShapeParam::DeformKind::Scale
+                                       ? Vec3{1, 1, 1}
+                                       : Vec3{0, 1, 0});
+        if (p.deformAnchors.empty() || p.id.empty() || find(p.id)) continue;
+
+        // neutral default: Scale -> magnitude 1; Translate/Protrude -> 0
+        const float neutral = p.deformKind == ShapeParam::DeformKind::Scale ? 1.f : 0.f;
+        float def = (p.maxS > p.minS)
+                        ? std::clamp((neutral - p.minS) / (p.maxS - p.minS), 0.f, 1.f)
+                        : 0.5f;
+        p.defValue = r.value("def", def);
+        p.value = p.defValue;
+        params_.push_back(std::move(p));
+    }
+}
+
 float ShapeController::effectorValue(ShapeParam::Effect kind) const {
     int idx = effParam_[static_cast<int>(kind)];
     if (idx < 0) {
@@ -375,7 +603,7 @@ float ShapeController::effectorValue(ShapeParam::Effect kind) const {
 }
 
 void ShapeController::applyEffectorsToMesh() {
-    if (!model_ || effAnchors_.empty()) return;
+    if (!model_ || (effAnchors_.empty() && deformAnchors_.empty())) return;
     const float tipLen = effectorValue(ShapeParam::Effect::Protrude);
     const float tipR = std::max(effectorValue(ShapeParam::Effect::TipRadius), 1e-3f);
     const float aR = std::max(effectorValue(ShapeParam::Effect::AreolaRadius), 1e-3f);
@@ -406,6 +634,55 @@ void ShapeController::applyEffectorsToMesh() {
             prim.blendedPos[ev.vert] = ev.basePos + ev.baseNrm * h;
             // gradient-corrected normal so the dome actually shades
             prim.blendedNormal[ev.vert] = (ev.baseNrm + ev.toVert * g).normalized();
+        }
+    }
+
+    // ---- region deforms (face editor: eyes / nose / mouth) ----
+    // All prims inside the region (iris, white, highlight, eyeline, skin) get
+    // the SAME transform — nothing detaches. Deltas are accumulated per
+    // vertex and applied ONCE: morph prims get += on top of the fresh blend
+    // (the blend resets blendedPos every pass), non-morph prims (body!) are
+    // rewritten from pos — their blendedPos is NOT reset by the blend, so a
+    // plain += would accumulate drift on every slider move (head peeling).
+    std::map<std::pair<int, int>, std::vector<std::pair<int, Vec3>>> deltas;
+    for (const ShapeParam& p : params_) {
+        if (p.type != ShapeParam::Type::VertexDeform) continue;
+        const float m = p.minS + (p.maxS - p.minS) * p.value;
+        const bool neutral = (p.deformKind == ShapeParam::DeformKind::Scale) ? (m == 1.f)
+                                                                             : (m == 0.f);
+        if (neutral) continue;
+        const float r = std::max(p.deformRadius, 1e-3f);
+        for (size_t ai = 0; ai < p.deformAnchors.size(); ++ai) {
+            const DeformAnchor& a = deformAnchors_[p.deformAnchors[ai]];
+            const Vec3 axis = p.deformAxes.size() == 1 ? p.deformAxes[0] : p.deformAxes[ai];
+            for (const DeformAnchor::V& v : a.verts) {
+                float e = gauss(v.d, r);
+                if (e < 1e-3f) continue;
+                Vec3 delta{0, 0, 0};
+                if (p.deformKind == ShapeParam::DeformKind::Translate) {
+                    delta = axis * (m * e);
+                } else if (p.deformKind == ShapeParam::DeformKind::Scale) {
+                    delta = {v.toVert.x * axis.x * (m - 1.f) * e,
+                             v.toVert.y * axis.y * (m - 1.f) * e,
+                             v.toVert.z * axis.z * (m - 1.f) * e};
+                } else { // Protrude
+                    delta = a.nrm * (m * e);
+                }
+                deltas[{v.mesh, v.prim}].emplace_back(v.vert, delta);
+            }
+        }
+    }
+    for (auto& kv : deltas) {
+        Primitive& prim = model_->meshes[kv.first.first].prims[kv.first.second];
+        if (prim.blendedPos.size() != prim.pos.size()) continue;
+        if (!prim.morphs.empty()) {
+            for (const auto& vd : kv.second)
+                prim.blendedPos[vd.first] = prim.blendedPos[vd.first] + vd.second;
+        } else {
+            std::map<int, Vec3> sum; // one rewrite per vert, all deltas merged
+            for (const auto& vd : kv.second) sum[vd.first] = sum[vd.first] + vd.second;
+            for (const auto& vd : sum)
+                prim.blendedPos[vd.first] = prim.pos[vd.first] + vd.second;
         }
     }
 }
@@ -516,12 +793,20 @@ void ShapeController::apply() {
         }
     }
 
-    // 4) vertex effectors: any change needs a mesh re-stamp + re-upload
+    // 4) vertex effectors/deforms: any change needs a mesh re-stamp + re-upload
     for (int k = 0; k < 5; ++k) {
         float v = effectorValue(static_cast<ShapeParam::Effect>(k));
         if (v != effLast_[k]) {
             effLast_[k] = v;
             if (!effAnchors_.empty()) morphsDirty = true;
+        }
+    }
+    if (deformLast_.size() != params_.size()) deformLast_.assign(params_.size(), -1.f);
+    for (size_t i = 0; i < params_.size(); ++i) {
+        if (params_[i].type != ShapeParam::Type::VertexDeform) continue;
+        if (params_[i].value != deformLast_[i]) {
+            deformLast_[i] = params_[i].value;
+            if (!deformAnchors_.empty()) morphsDirty = true;
         }
     }
 }
