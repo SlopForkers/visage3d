@@ -115,28 +115,50 @@
       "bones": ["J_Bip_C_Head"],
       "patterns": ["(?i)(^|[_ ])head$"],
       "min": 0.9, "max": 1.15, "axes": [1.0, 1.0, 1.0], "compensate": false
-    },
-    {
-      "id": "eye_size", "name": "Размер глаз", "group": "Лицо",
-      "bones": ["J_Adj_L_FaceEye", "J_Adj_R_FaceEye"],
-      "patterns": ["(?i)face_?eye$", "(?i)(^|[_ ])eye[lr]?$"],
-      "min": 0.7, "max": 1.4, "axes": [1.0, 1.0, 1.0], "compensate": false
-    },
-    {
-      "id": "eye_spacing", "name": "Ширина глаз", "group": "Лицо",
-      "min": 0.0, "max": 1.0,
-      "entries": [
-        { "translate": { "bones": ["J_Adj_L_FaceEye"], "patterns": ["(?i)l_?face_?eye$", "(?i)eye_?l$"], "axis": [1.0, 0.0, 0.0], "factor": 0.015, "mode": "value" } },
-        { "translate": { "bones": ["J_Adj_R_FaceEye"], "patterns": ["(?i)r_?face_?eye$", "(?i)eye_?r$"], "axis": [-1.0, 0.0, 0.0], "factor": 0.015, "mode": "value" } }
-      ]
-    },
-    {
-      "id": "eye_height", "name": "Высота глаз", "group": "Лицо",
-      "min": 0.0, "max": 1.0,
-      "entries": [
-        { "translate": { "bones": ["J_Adj_L_FaceEye", "J_Adj_R_FaceEye"], "patterns": ["(?i)face_?eye$"], "axis": [0.0, 1.0, 0.0], "factor": 0.015, "mode": "value" } }
-      ]
     }
+  ],
+
+  "deformAnchors": {
+    "comment3": "Якоря региональных деформеров лица. bones/patterns — якорь = позиция кости (бинд); material — якорь = центроид вершин примитивов с подходящим материалом; extreme [x,y,z] — самая удалённая по направлению вершина (нос).",
+    "eye_l": { "bones": ["J_Adj_L_FaceEye"],
+               "patterns": ["(?i)l_?face_?eye$", "(?i)eye_?l$", "(?i)left_?eye$"] },
+    "eye_r": { "bones": ["J_Adj_R_FaceEye"],
+               "patterns": ["(?i)r_?face_?eye$", "(?i)eye_?r$", "(?i)right_?eye$"] },
+    "mouth": { "material": ["(?i)facemouth", "(?i)mouth"] },
+    "nose":  { "material": ["(?i)face_?00_?skin", "(?i)face.*skin"], "extreme": [0.0, 0.0, 1.0] }
+  },
+  "deformParams": [
+    { "id": "eye_size", "name": "Размер глаз", "group": "Глаза",
+      "anchors": ["eye_l", "eye_r"], "kind": "scale", "axis": [1.0, 1.0, 1.0],
+      "radius": 0.04, "min": 0.8, "max": 1.25 },
+    { "id": "eye_spacing", "name": "Расстояние глаз", "group": "Глаза",
+      "anchors": ["eye_l", "eye_r"], "kind": "translate",
+      "axis": [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+      "radius": 0.04, "min": -0.006, "max": 0.006 },
+    { "id": "eye_height", "name": "Высота глаз", "group": "Глаза",
+      "anchors": ["eye_l", "eye_r"], "kind": "translate", "axis": [0.0, 1.0, 0.0],
+      "radius": 0.04, "min": -0.006, "max": 0.006 },
+    { "id": "nose_size", "name": "Размер носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "scale", "axis": [1.0, 1.0, 1.0],
+      "radius": 0.03, "min": 0.75, "max": 1.35 },
+    { "id": "nose_length", "name": "Длина носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "translate", "axis": [0.0, 0.0, 1.0],
+      "radius": 0.028, "min": -0.004, "max": 0.01 },
+    { "id": "nose_height", "name": "Высота носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "translate", "axis": [0.0, 1.0, 0.0],
+      "radius": 0.028, "min": -0.005, "max": 0.005 },
+    { "id": "nose_width", "name": "Ширина носа", "group": "Нос",
+      "anchors": ["nose"], "kind": "scale", "axis": [1.0, 0.0, 0.0],
+      "radius": 0.03, "min": 0.7, "max": 1.5 },
+    { "id": "mouth_width", "name": "Ширина рта", "group": "Рот",
+      "anchors": ["mouth"], "kind": "scale", "axis": [1.0, 0.0, 0.0],
+      "radius": 0.032, "min": 0.7, "max": 1.4 },
+    { "id": "mouth_height", "name": "Высота рта", "group": "Рот",
+      "anchors": ["mouth"], "kind": "translate", "axis": [0.0, 1.0, 0.0],
+      "radius": 0.03, "min": -0.005, "max": 0.005 },
+    { "id": "mouth_size", "name": "Размер рта", "group": "Рот",
+      "anchors": ["mouth"], "kind": "scale", "axis": [1.0, 1.0, 1.0],
+      "radius": 0.032, "min": 0.8, "max": 1.3 }
   ],
 
   "effectorAnchors": {

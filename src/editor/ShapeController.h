@@ -1,6 +1,7 @@
 #pragma once
 #include "model/Model.h"
 #include "model/Skeleton.h"
+#include "json.hpp"
 #include <cstdint>
 #include <map>
 #include <string>
@@ -10,7 +11,7 @@ namespace ce {
 
 // A single editable shape parameter, either morph-driven or bone-driven.
 struct ShapeParam {
-    enum class Type { Morph, BoneScale, VertexEffect };
+    enum class Type { Morph, BoneScale, VertexEffect, VertexDeform };
     Type type;
     std::string id;    // stable id used in presets, e.g. "breast_size" / "morph.Fcl_EYE_Joy"
     std::string name;  // UI label
@@ -24,6 +25,14 @@ struct ShapeParam {
     // VertexEffect kind (Type::VertexEffect only)
     enum class Effect { Protrude = 0, TipRadius = 1, AreolaRadius = 2, Bulge = 3, Tint = 4 };
     Effect effect = Effect::Protrude;
+
+    // VertexDeform (Type::VertexDeform only): region transform around named
+    // anchors (bind space, gaussian falloff). magnitude = lerp(minS, maxS).
+    enum class DeformKind { Translate = 0, Scale = 1, Protrude = 2 };
+    DeformKind deformKind = DeformKind::Translate;
+    std::vector<int> deformAnchors;   // indices into the controller's deformAnchors_
+    std::vector<Vec3> deformAxes;     // per-anchor axis (size 1 = shared by all)
+    float deformRadius = 0.03f;       // gaussian falloff radius (m)
 
     // Bone-scale rules: each entry scales a set of bones around given axes
     // (axes = per-axis exponent), optionally compensating direct children.
@@ -67,7 +76,7 @@ public:
     // bones, so they follow breast_size). Idempotent: displaced vertices are
     // rewritten from stored bind bases. Call after the morph re-blend.
     void applyEffectorsToMesh();
-    bool hasEffectors() const { return !effAnchors_.empty(); }
+    bool hasEffectors() const { return !effAnchors_.empty() || !deformAnchors_.empty(); }
     // current effector state (for the areola shader tint)
     Vec3 effectorAnchorWorld(int index) const; // index < effectorAnchorCount()
     int effectorAnchorCount() const { return static_cast<int>(effAnchors_.size()); }
@@ -119,6 +128,27 @@ private:
     std::vector<EffectorAnchor> effAnchors_;
     int effParam_[5] = {-1, -1, -1, -1, -1}; // param index per Effect kind
     float effLast_[5] = {-1.f, -1.f, -1.f, -1.f, -1.f}; // change detection
+
+    // ---- vertex deform state (face editor: eyes / nose / mouth) ----
+    // Region transform around a named anchor, applied additively on top of
+    // the morph blend (idempotent: the blend resets blendedPos first).
+    struct DeformAnchor {
+        std::string id;
+        Vec3 pos{0, 0, 0};   // bind-space anchor position
+        Vec3 nrm{0, 0, 1};   // surface normal at the anchor (for Protrude)
+        struct V {
+            int mesh, prim, vert;
+            float d;     // |bindPos - pos|
+            Vec3 toVert; // bindPos - pos
+        };
+        std::vector<V> verts; // vertices inside the hard radius cap
+    };
+    std::vector<DeformAnchor> deformAnchors_;
+    std::vector<float> deformLast_; // per-param change detection
+
+    void addDeformParams(const std::string& configPath);
+    void buildDeformAnchors(const nlohmann::json& anchorsJson);
+    void addDeformParamsFromJson(const nlohmann::json& rules);
 };
 
 } // namespace ce
