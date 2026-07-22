@@ -174,11 +174,7 @@ void EditorUI::drawClothingTab() {
             if (cb.wearClothing) cb.wearClothing(f);
     }
     ImGui::TextDisabled("Веса переносятся с тела автоматически.\n"
-                        "Одежда повторяет изменения фигуры.");
-    ImGui::Checkbox("Авто-подгонка под фигуру", &autoRefit);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Пересчитывать посадку одежды после изменения\n"
-                          "параметров тела (с задержкой ~0.8 с)");
+                        "Одежда повторяет изменения фигуры через скелет.");
 
     // ---- equipment slots ----
     if (ImGui::TreeNodeEx("Слоты", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -271,7 +267,7 @@ void EditorUI::drawClothingTab() {
                 for (int i = 0; i < static_cast<int>(clothing->items().size()); ++i)
                     if (clothing->items()[i].type == t.id) {
                         clothing->applyType(i, t.id);
-                        if (cb.refitClothing) cb.refitClothing(i);
+                        if (cb.rebindClothing) cb.rebindClothing(i);
                     }
             }
             ImGui::PopID();
@@ -330,7 +326,7 @@ void EditorUI::drawClothingTab() {
                     bool selected = (t.id == item.type);
                     if (ImGui::Selectable(t.name.c_str(), selected)) {
                         clothing->applyType(i, t.id);
-                        if (cb.refitClothing) cb.refitClothing(i);
+                        if (cb.rebindClothing) cb.rebindClothing(i);
                     }
                     if (selected) ImGui::SetItemDefaultFocus();
                 }
@@ -338,26 +334,7 @@ void EditorUI::drawClothingTab() {
             }
         }
 
-        if (ImGui::TreeNode("Подгонка")) {
-            float padMm = item.padding * 1000.f;
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::SliderFloat("Отступ, мм", &padMm, 0.f, 30.f)) {
-                item.padding = padMm / 1000.f;
-                if (cb.padClothing) cb.padClothing(i); // cheap live update
-            }
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::SliderFloat("Обтяжка", &item.shrink, 0.f, 1.f)) {
-                if (cb.padClothing) cb.padClothing(i); // same cheap path
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Притянуть ткань к телу (с офсетом «Отступ»)");
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::SliderFloat("Свобода", &item.looseness, 0.f, 1.f)) {
-                if (cb.padClothing) cb.padClothing(i); // drape is precomputed, cheap
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Драпировка: ткань обволакивает, не повторяя анатомию\n"
-                                  "(не проваливается между грудей и в впадины)");
+        if (ImGui::TreeNode("Трансформ")) {
             float scale = item.fitScale;
             ImGui::SetNextItemWidth(-1);
             if (ImGui::SliderFloat("Масштаб", &scale, 0.2f, 3.f, "x%.3f")) {
@@ -365,7 +342,7 @@ void EditorUI::drawClothingTab() {
                 if (cb.liveFitClothing) cb.liveFitClothing(i); // live during drag
             }
             if (ImGui::IsItemDeactivatedAfterEdit())
-                if (cb.refitClothing) cb.refitClothing(i);
+                if (cb.rebindClothing) cb.rebindClothing(i);
             float off[3] = {item.fitOffset.x, item.fitOffset.y, item.fitOffset.z};
             ImGui::SetNextItemWidth(-1);
             if (ImGui::SliderFloat3("Смещение", off, -0.5f, 0.5f, "%.3f м")) {
@@ -373,11 +350,11 @@ void EditorUI::drawClothingTab() {
                 if (cb.liveFitClothing) cb.liveFitClothing(i);
             }
             if (ImGui::IsItemDeactivatedAfterEdit())
-                if (cb.refitClothing) cb.refitClothing(i);
-            if (ImGui::Button("Подогнать под тело")) {
+                if (cb.rebindClothing) cb.rebindClothing(i);
+            if (ImGui::Button("Вернуть на якорь")) {
                 // re-anchor by type (position only — scale is the user's)
                 clothing->applyType(i, item.type);
-                if (cb.refitClothing) cb.refitClothing(i);
+                if (cb.rebindClothing) cb.rebindClothing(i);
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Переместить на якорь типа (масштаб сохраняется)");
@@ -402,9 +379,6 @@ nlohmann::json EditorUI::clothingToJson() const {
         e["path"] = item.path;
         e["fitScale"] = item.fitScale;
         e["fitOffset"] = {item.fitOffset.x, item.fitOffset.y, item.fitOffset.z};
-        e["padding"] = item.padding;
-        e["shrink"] = item.shrink;
-        e["looseness"] = item.looseness;
         e["visible"] = item.visible;
         e["type"] = item.type;
         e["slot"] = item.slot;

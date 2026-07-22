@@ -37,9 +37,9 @@ private:
     int bodySlot_ = -1;
     Gizmo3D gizmo_;
 
-    // debounced clothing refit on body-shape change
+    // body-shape revision tracking: invalidates the shared clothing point
+    // cloud (bound garments follow the skeleton live — nothing to redo)
     uint64_t seenRevision_ = 0;
-    double refitAt_ = 0.0;
 
     // CLI options
     std::string optModel_ = "female_base.vrm";
@@ -66,8 +66,7 @@ private:
     // clothing pipeline (UI callbacks)
     void addClothing(const std::string& path);
     void wearClothing(const std::string& path); // add + unequip the slot's previous item
-    void refitClothing(int index);
-    void padClothing(int index);
+    void rebindClothing(int index);
     void liveFitClothing(int index);
     void removeClothing(int index);
     void setClothingVisible(int index, bool visible);

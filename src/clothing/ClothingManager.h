@@ -8,8 +8,12 @@
 
 namespace ce {
 
-// A clothing item: a static (unskinned) mesh auto-fitted and auto-skinned
-// onto the body by nearest-surface weight transfer.
+// A clothing item: a static (unskinned) mesh auto-skinned onto the body by
+// nearest-point weight transfer. The garment mesh itself is NEVER deformed:
+// it keeps its authored shape and follows the body through the shared
+// skeleton (GPU skinning). Body morphs are bone scales/translates, so the
+// clothing inherits every figure change automatically, in real time —
+// no refitting, no surface clamping, no tearing/collapse by construction.
 struct ClothingItem {
     std::string name;      // display name (file name)
     std::string path;      // source file (for presets)
@@ -29,28 +33,13 @@ struct ClothingItem {
     Mat4 fitMatrixNoTrans() const {
         return Mat4::rotation(fitRot) * Mat4::scaling({fitScale, fitScale, fitScale});
     }
-    float padding = 0.004f; // surface offset (m) against body poke-through
-    float shrink = 0.f;     // 0..1 shrink-wrap ("magnet") towards the body surface
-    float looseness = 0.f;  // 0..1 drape: smooths the fit, bridges concavities
-                            // (cleavage!) instead of painting the body shape
     bool visible = true;
     std::string type = "auto"; // clothing type id ("auto" = keep authored position)
     std::string slot;          // equipment slot id ("" = free, not slot-bound)
     Vec3 rawCenter{0, 0, 0};   // bbox center in raw space (gizmo pivot)
-    Vec3 rawMin{0, 0, 0}, rawMax{0, 0, 0}; // raw-space bbox (for size-to-body)
+    Vec3 rawMin{0, 0, 0}, rawMax{0, 0, 0}; // raw-space bbox
 
     bool weightsReady = false; // false until transferWeights succeeded
-
-    // per-mesh / per-prim fitted data (kept for cheap padding updates)
-    struct PrimFit {
-        std::vector<Vec3> basePos;   // fitted, before padding/shrink
-        std::vector<Vec3> pushDir;   // away-from-body direction
-        std::vector<Vec3> targetPos; // nearest body surface point
-        std::vector<Vec3> drapePos;  // nearest point on the DRAPE ENVELOPE
-                                     // (smoothed body: concavities filled)
-        std::vector<Vec3> drapeDir;  // envelope normal
-    };
-    std::vector<std::vector<PrimFit>> fits; // [mesh][prim]
 };
 
 // A clothing-type anchor preset: where a garment of this type should sit on
@@ -63,17 +52,19 @@ struct ClothTypePreset {
     bool bottomAlign = false;
 };
 
-// Owns clothing items and the auto-fitting pipeline:
+// Owns clothing items and the binding pipeline:
 //  1) unit auto-detection (mm/cm/dm/m) from bounding box magnitude
-//  2) deterministic placement: type anchor (height on the body) + size-to-body
-//     width match (no iterative search — see applyType)
-//  3) weight transfer from nearest body surface points (spatial hash grid)
-//  4) padding along the away-from-body direction
-// Body-shape parameters deform clothing automatically afterwards, because
-// clothing vertices are skinned by the same skeleton.
+//  2) deterministic placement: type anchor (height on the body) — position
+//     only, the scale is the user's (gizmo / slider), presets store it
+//  3) weight transfer: each garment vertex (at its current transform) takes
+//     an inverse-square blend of the K nearest body points' skin weights
+//     (spatial hash grid, exact expanding-ring KNN)
+// After binding, the garment is rendered with GPU skinning against the body
+// skeleton, so it tracks every body-shape change with zero extra work.
 //
 // The body point cloud + its lookup grid are cached and shared by all items;
-// call invalidateBody() when the body shape/pose changes.
+// call invalidateBody() when the body shape/pose changes (affects future
+// binds only — already bound items follow the skeleton live).
 class ClothingManager {
 public:
     ClothingManager();
@@ -82,26 +73,25 @@ public:
     void bind(Model& body, Skeleton& skeleton);
 
     // Loads a clothing model, auto-detects its unit scale, places it by type
-    // and transfers weights. deferFit=true skips placement+transfer (the
-    // caller sets stored fit params and calls refit() itself — preset load).
+    // and transfers weights. deferBind=true skips placement+transfer (the
+    // caller sets the stored transform and calls rebind() itself — presets).
     // Returns item index or -1 on error (err filled).
-    int add(const std::string& path, std::string& err, bool deferFit = false);
+    int add(const std::string& path, std::string& err, bool deferBind = false);
     void remove(int index);
     void clear();
 
-    // Recomputes fitted vertex data + weight transfer (after fit transform change)
-    void refit(int index);
-    // Cheap: re-applies padding/shrink from stored basePos/pushDir/targetPos
-    void applyPadding(int index);
-    // Cheap: re-transforms vertices with the current fit matrix (gizmo dragging);
-    // clamps against stored (stale) targets. Call refit() on release.
+    // Full weight (re)transfer at the item's current transform (after gizmo
+    // release / slider edit / transform restore from a preset).
+    void rebind(int index);
+    // Cheap: re-transforms vertices with the current fit matrix (gizmo
+    // dragging). Weights stay as-is; call rebind() on release.
     void applyFit(int index);
 
     // ---- clothing types with anchor offsets ----
     // Applies the type's anchor: centers the garment X/Z on the body axis and
     // moves it to the type's target height. The scale is NOT touched — the
     // user fits the size (gizmo / slider), presets store it. "auto"/"accessory"
-    // keep the authored placement entirely. Call refit() after.
+    // keep the authored placement entirely. Call rebind() after.
     void applyType(int index, const std::string& typeId);
 
     static std::string detectType(const std::string& fileName);
@@ -150,33 +140,18 @@ private:
     // body surface point cloud for nearest queries (world space, current pose)
     struct BodyPoint {
         Vec3 pos;
-        Vec3 nrm;   // skinned surface normal (true outward direction)
         uint16_t joints[4];
         float weights[4];
-        bool arm;   // dominant joint belongs to an arm (excluded from width match)
     };
     struct CloudGrid;
-    std::vector<BodyPoint> cloud_;       // cached, shared by all items
-    std::unique_ptr<CloudGrid> grid_;    // spatial hash over cloud_
-    std::vector<BodyPoint> drapeCloud_;  // smoothed copy of cloud_ (drape envelope:
-                                         // concavities filled, convex parts restored)
-    std::unique_ptr<CloudGrid> drapeGrid_;
-    std::vector<uint32_t> bodyAdjOff_, bodyAdjIdx_; // cloud vertex adjacency (CSR)
-    std::vector<bool> armJoints_;        // per body-skin joint: under an arm bone
+    std::vector<BodyPoint> cloud_;    // cached, shared by all items
+    std::unique_ptr<CloudGrid> grid_; // spatial hash over cloud_
     bool cloudDirty_ = true;
 
-    const std::vector<BodyPoint>& bodyCloud(); // builds cloud_+grids when dirty
-    void buildArmJointFlags();
-    // drape envelope: smoothing + convex restoration of the body cloud
-    static void smoothCloud(std::vector<BodyPoint>& cloud, const std::vector<uint32_t>& off,
-                            const std::vector<uint32_t>& idx, int iters, float lambda);
-    // Exact K nearest points of a cloud (expanding grid rings + safe
+    const std::vector<BodyPoint>& bodyCloud(); // builds cloud_+grid when dirty
+    // Exact K nearest points of the cloud (expanding grid rings + safe
     // early-out, brute force only as a last resort). Returns count (<= k).
-    int knnCloud(const Vec3& p, int k, int* outIdx, float* outDistSq,
-                 const std::vector<BodyPoint>& cloud, const CloudGrid& grid) const;
-    int knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq) const {
-        return knnCloud(p, k, outIdx, outDistSq, cloud_, *grid_);
-    }
+    int knnCloud(const Vec3& p, int k, int* outIdx, float* outDistSq) const;
     // Body center (x,z) of the cloud; falls back to origin when empty.
     void bodyAxisCenter(float& cx, float& cz) const;
 };

@@ -8,7 +8,8 @@ namespace ce {
 
 // Saves / loads shape-parameter presets as JSON files in the presets directory.
 // Format: { "model": "<file>", "values": { "<param id>": <0..1> },
-//           "clothing": [ { "path", "fitScale", "fitOffset", "padding", "visible" } ] }
+//           "clothing": [ { "path", "fitScale", "fitOffset", "fitRot", "visible",
+//                          "type", "slot" } ] }
 class Presets {
 public:
     explicit Presets(std::string dir = "presets") : dir_(std::move(dir)) {}

@@ -138,8 +138,7 @@ bool Application::init(int argc, char** argv) {
     };
     ui_.cb.saveScreenshot = [this](const std::string& p) { saveScreenshot(p); };
     ui_.cb.resetCamera = [this]() { resetCamera(); };
-    ui_.cb.refitClothing = [this](int i) { refitClothing(i); };
-    ui_.cb.padClothing = [this](int i) { padClothing(i); };
+    ui_.cb.rebindClothing = [this](int i) { rebindClothing(i); };
     ui_.cb.liveFitClothing = [this](int i) { liveFitClothing(i); };
     ui_.cb.removeClothing = [this](int i) { removeClothing(i); };
     ui_.cb.clothingVisible = [this](int i, bool v) { setClothingVisible(i, v); };
@@ -272,18 +271,12 @@ void Application::wearClothing(const std::string& path) {
     }
 }
 
-void Application::refitClothing(int index) {
+void Application::rebindClothing(int index) {
     if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
-    clothing_.refit(index);
+    clothing_.rebind(index);
     ClothingItem& item = clothing_.items()[index];
     renderer_.syncStatic(item.renderSlot);  // joints/weights changed
     renderer_.syncVertices(item.renderSlot);
-}
-
-void Application::padClothing(int index) {
-    if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
-    clothing_.applyPadding(index);
-    renderer_.syncVertices(clothing_.items()[index].renderSlot);
 }
 
 void Application::liveFitClothing(int index) {
@@ -315,7 +308,7 @@ bool Application::updateGizmo(int winW, int winH) {
         clothing_.applyFit(sel);
         renderer_.syncVertices(item.renderSlot);
     }
-    if (ended) refitClothing(sel);
+    if (ended) rebindClothing(sel);
 
     gizmo_.draw(winW, winH, camera_);
     return consumed;
@@ -351,7 +344,7 @@ void Application::applyClothingPreset(const nlohmann::json& items) {
         std::string path = e.value("path", std::string{});
         if (path.empty()) continue;
         std::string err;
-        // deferFit: placement runs once, with the stored fit params (not twice)
+        // deferBind: placement runs once, with the stored transform (not twice)
         int idx = clothing_.add(path, err, true);
         if (idx < 0) {
             ui_.status = "Не найдена одежда пресета: " + path;
@@ -362,9 +355,6 @@ void Application::applyClothingPreset(const nlohmann::json& items) {
         if (e.contains("fitOffset") && e["fitOffset"].size() == 3)
             item.fitOffset = {e["fitOffset"][0].get<float>(), e["fitOffset"][1].get<float>(),
                               e["fitOffset"][2].get<float>()};
-        item.padding = e.value("padding", item.padding);
-        item.shrink = e.value("shrink", item.shrink);
-        item.looseness = e.value("looseness", item.looseness);
         item.visible = e.value("visible", true);
         item.type = e.value("type", std::string{"auto"});
         item.slot = e.value("slot", ClothingManager::slotForType(item.type));
@@ -372,7 +362,10 @@ void Application::applyClothingPreset(const nlohmann::json& items) {
             item.fitRot = Quat{e["fitRot"][0].get<float>(), e["fitRot"][1].get<float>(),
                                e["fitRot"][2].get<float>(), e["fitRot"][3].get<float>()}
                               .normalized();
-        clothing_.refit(idx); // re-transfer with stored fit params
+        // no stored transform: fall back to the type anchor for placement
+        if (!e.contains("fitOffset"))
+            clothing_.applyType(idx, item.type);
+        clothing_.rebind(idx); // weight transfer with the stored transform
         item.renderSlot = renderer_.addModel(item.model, clothing_.bodySkinIndex());
         renderer_.setVisible(item.renderSlot, item.visible);
     }
@@ -454,19 +447,12 @@ int Application::run() {
         renderer_.areolaColor = Vec3{ui_.areolaColor[0], ui_.areolaColor[1], ui_.areolaColor[2]};
         for (int i = 0; i < 2; ++i) renderer_.areolaAnchors[i] = controller_.effectorAnchorWorld(i);
 
-        // debounced clothing refit (fits adapt to the new body shape)
+        // body shape changed: bound garments follow the skeleton live (GPU
+        // skinning), so only the shared point cloud needs invalidating for
+        // future binds
         if (controller_.revision != seenRevision_) {
             seenRevision_ = controller_.revision;
-            clothing_.invalidateBody(); // rebuild the shared point cloud once
-            refitAt_ = now + 0.75;
-        }
-        if (ui_.autoRefit && refitAt_ > 0.0 && now >= refitAt_ &&
-            !clothing_.items().empty()) {
-            refitAt_ = 0.0;
-            std::fprintf(stderr, "Auto-refit clothing for body revision %llu\n",
-                         static_cast<unsigned long long>(controller_.revision));
-            for (int i = 0; i < static_cast<int>(clothing_.items().size()); ++i)
-                refitClothing(i);
+            clothing_.invalidateBody();
         }
 
         // ---- render scene ----
