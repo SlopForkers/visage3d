@@ -14,6 +14,7 @@ namespace ce {
 
 struct UICallbacks {
     std::function<void(const std::string&)> openModel;      // via native dialog
+    std::function<void(const std::string&)> exportModel;    // .glb export (save dialog)
     std::function<void(const std::string&)> wearClothing;   // wear (replaces slot content)
     std::function<void()> rescanCatalog;                    // rescan the models/ dir
     std::function<void(const std::string&)> saveScreenshot; // path

@@ -52,6 +52,7 @@ private:
     float optTargetY_ = 0.f; // camera target height (0 = default)
     std::vector<std::pair<std::string, float>> optSet_; // --set id=value overrides
     std::vector<std::string> optClothes_;               // --clothe path
+    std::string optExport_;                             // --export out.glb
     bool listParams_ = false;                           // --listparams debug
 
     std::string pendingScreenshot_;
@@ -72,6 +73,7 @@ private:
     void setClothingVisible(int index, bool visible);
     void applyClothingPreset(const nlohmann::json& items);
     void clearClothing();
+    void exportModel(const std::string& path); // .glb export (current state)
 };
 
 } // namespace ce

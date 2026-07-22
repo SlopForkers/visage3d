@@ -24,7 +24,7 @@ CLI: `[model] [--model p] [--preset name] [--screenshot out.png] [--frames N] [-
 ## Архитектура
 
 - `src/core/` — `Math3D.h` (vec/quat/mat, column-major), `GL.{h,cpp}` (свой загрузчик GL-функций через `glfwGetProcAddress`, без glad/glew).
-- `src/model/` — `Model.h` (рендер-независимые данные), `GltfLoader` (tinygltf; .vrm/.glb определяются по магии `glTF`), `Skeleton` (мировые матрицы узлов, per-node scale+translate offsets).
+- `src/model/` — `Model.h` (рендер-независимые данные), `GltfLoader` (tinygltf; .vrm/.glb определяются по магии `glTF`), `GltfExporter` (см. ниже), `Skeleton` (мировые матрицы узлов, per-node scale+translate offsets).
 - `src/editor/` — `ShapeController` (параметры тела/лица/морфов), `Presets` (JSON в `presets/`).
 - `src/clothing/` — `ClothingManager`: автоподгонка и автоскиннинг одежды (см. ниже).
 - `src/render/` — `Shader`, `Camera` (орбитальная), `ModelRenderer` (мульти-модель по слотам:
@@ -178,9 +178,26 @@ UI одежды: слоты (снять/выбрать), каталог, вид�
   padding, shrink, looseness, visible, type, slot, fitRot}]}` — поля `padding/shrink/looseness`
   устарели (игнорируются при чтении, не пишутся); без `fitOffset` — позиция с якоря типа.
 
+## Экспорт (.glb)
+
+`GltfExporter` (tinygltf writer): кнопка «Экспорт GLB...» (шапка панели, GetSaveFileNameW)
+и CLI `--export out.glb` (после загрузки/пресета/--set/--clothe; перед экспортом — принудительный
+re-stamp: `skeleton_.update()` + `syncVertices` + `applyEffectorsToMesh`). Что запекается:
+- **фигура** — `scaleOffset`/`translateOffset` скелета → в TRS узлов (IBM не трогаем —
+  стандартный скиннинг воспроизводит фигуру);
+- **морфы + редакторы** (соски, деформы лица) — в POSITION/NORMAL (из `blended*`); морф-таргеты
+  сохраняются (веса 0), эмоции остаются доступными в других тулзах;
+- **одежда** (только видимая) — отдельными мешами со скином тела (вершины в bind-мире тела,
+  node identity, joints/weights из переноса);
+- **текстуры** — RGBA → PNG через stb_image_write, встраиваются; unlit → `KHR_materials_unlit`.
+Проверка — round-trip: экспорт → загрузка того же .glb → скриншот должен совпасть.
+ПОДВОДНЫЙ КАМЕНЬ: при сборке accessor-ов размер bufferView = count × sizeof(ЭЛЕМЕНТА);
+JOINTS_0 изначально писался как count × sizeof(uint16_t) вместо sizeof(u16vec4) — loader при
+чтении выходил за границу bufferView (75% вершин с мусорными костями, «камуфляж» на теле).
+
 ## Ограничения / TODO
 
 - Макс. 80 костей в uniform-массиве.
-- Экспорт обратно в .vrm не реализован (только пресеты JSON).
+- Экспорт .vrm не реализован (VRM-расширение/MToon не пишем; экспорт только .glb + пресеты JSON).
 - UI только русский; без шрифта с кириллицей подписи сломаются.
 - `models/` — исходники одежды (zip распакованы в одноимённые подпапки).

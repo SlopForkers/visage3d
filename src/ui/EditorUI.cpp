@@ -15,12 +15,20 @@ void EditorUI::draw(int winW, int winH, float fps) {
                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus;
     ImGui::Begin("Редактор персонажа", nullptr, flags);
 
-    // ---- header: model open ----
+    // ---- header: model open / export ----
     if (ImGui::Button("Открыть модель...", ImVec2(-1, 0))) {
         std::vector<std::string> files = openFileDialog(
             L"Открыть модель", L"glTF / VRM\0*.vrm;*.glb;*.gltf\0Все файлы\0*.*\0", false);
         if (!files.empty() && cb.openModel) cb.openModel(files.front());
     }
+    if (ImGui::Button("Экспорт GLB...", ImVec2(-1, 0))) {
+        std::string f = saveFileDialog(L"Экспорт модели", L"glTF (*.glb)\0*.glb\0", L"glb");
+        if (!f.empty() && cb.exportModel) cb.exportModel(f);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Текущее состояние в .glb: фигура запечена в кости,\n"
+                          "морфы и редакторы — в вершины, одежда — скиннингом\n"
+                          "на тот же скелет (только видимые предметы)");
     if (model && !model->fileName.empty()) {
         ImGui::TextDisabled("%s", model->fileName.c_str());
         size_t verts = 0, tris = 0;
