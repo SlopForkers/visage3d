@@ -149,6 +149,31 @@ void ShapeController::setValues(const std::map<std::string, float>& v) {
     apply();
 }
 
+namespace {
+
+// std::regex ECMAScript does NOT support the "(?i)" inline flag — it throws.
+// Strip a leading "(?i)" and compile with icase instead. (For years every
+// "(?i)..." pattern in the configs silently threw and never matched — only
+// exact bone names worked.)
+std::regex makePatternRegex(const std::string& pat) {
+    std::string p = pat;
+    auto flags = std::regex_constants::ECMAScript;
+    if (p.rfind("(?i)", 0) == 0) {
+        p = p.substr(4);
+        flags |= std::regex_constants::icase;
+    }
+    return std::regex(p, flags);
+}
+
+bool patternMatches(const std::string& s, const std::string& pat) {
+    try {
+        return std::regex_search(s, makePatternRegex(pat));
+    } catch (...) { /* invalid pattern: no match */ }
+    return false;
+}
+
+} // namespace
+
 std::vector<int> ShapeController::matchBones(const std::vector<std::string>& names,
                                              const std::vector<std::string>& patterns) const {
     std::vector<int> out;
@@ -156,11 +181,8 @@ std::vector<int> ShapeController::matchBones(const std::vector<std::string>& nam
         const std::string& bn = model_->nodes[i].name;
         bool hit = std::find(names.begin(), names.end(), bn) != names.end();
         if (!hit)
-            for (const std::string& pat : patterns) {
-                try {
-                    if (std::regex_search(bn, std::regex(pat))) { hit = true; break; }
-                } catch (...) { /* invalid pattern: ignore */ }
-            }
+            for (const std::string& pat : patterns)
+                if (patternMatches(bn, pat)) { hit = true; break; }
         if (hit && std::find(out.begin(), out.end(), static_cast<int>(i)) == out.end())
             out.push_back(static_cast<int>(i));
     }
@@ -434,11 +456,8 @@ void ShapeController::buildDeformAnchors(const nlohmann::json& anchorsJson) {
     constexpr float kMaxRadius = 0.09f; // hard cap of the affected region (m)
 
     auto materialMatches = [](const std::string& name, const std::vector<std::string>& pats) {
-        for (const std::string& p : pats) {
-            try {
-                if (std::regex_search(name, std::regex(p))) return true;
-            } catch (...) { /* bad regex: no match */ }
-        }
+        for (const std::string& p : pats)
+            if (patternMatches(name, p)) return true;
         return false;
     };
 
