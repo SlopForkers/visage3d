@@ -7,9 +7,7 @@
   "clothing": [
     {
       "path": "models/pleated_skirt/scene.gltf",
-      "fitScale": 0.001,
-      "fitOffset": [0.009, 0.0, 0.059],
-      "padding": 0.008,
+      "type": "skirt",
       "visible": true
     }
   ]

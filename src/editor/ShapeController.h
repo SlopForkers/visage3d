@@ -83,7 +83,7 @@ public:
     void setValues(const std::map<std::string, float>& v);
 
     bool morphsDirty = true; // renderer must re-upload morphed vertex data
-    uint64_t revision = 0;   // bumped on every apply() — for debounced clothing refit
+    uint64_t revision = 0;   // bumped on every apply() — invalidates the clothing point cloud
 
 private:
     Model* model_ = nullptr;
