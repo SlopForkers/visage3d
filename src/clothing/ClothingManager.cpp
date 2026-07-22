@@ -124,14 +124,6 @@ Vec3 mul(const Mat3& m, const Vec3& v) {
             m.m[2] * v.x + m.m[5] * v.y + m.m[8] * v.z};
 }
 
-// value at the given fraction of a sorted-by-nth_element copy (percentile)
-float percentile(std::vector<float>& v, float frac) {
-    if (v.empty()) return 0.f;
-    size_t k = static_cast<size_t>(frac * (v.size() - 1));
-    std::nth_element(v.begin(), v.begin() + k, v.end());
-    return v[k];
-}
-
 // Single place where a fitted vertex is composed. The reference surface is
 // lerped between the real body surface (looseness=0, tight/anatomical) and
 // the drape envelope (looseness=1, concavities bridged like fabric). Then:
@@ -414,21 +406,6 @@ int ClothingManager::knnCloud(const Vec3& p, int k, int* outIdx, float* outDistS
     return found;
 }
 
-float ClothingManager::bodyWidthInBand(float y0, float y1) const {
-    float cx, cz;
-    bodyAxisCenter(cx, cz);
-    std::vector<float> radii;
-    for (const BodyPoint& bp : cloud_) {
-        if (bp.arm) continue; // T-pose arms would dominate the chest band
-        if (bp.pos.y < y0 || bp.pos.y > y1) continue;
-        float dx = bp.pos.x - cx, dz = bp.pos.z - cz;
-        radii.push_back(dx * dx + dz * dz);
-    }
-    if (radii.size() < 16) return 0.f;
-    float r75 = std::sqrt(percentile(radii, 0.75f));
-    return 2.f * r75;
-}
-
 void ClothingManager::bodyAxisCenter(float& cx, float& cz) const {
     cx = cz = 0.f;
     if (cloud_.empty()) return;
@@ -679,7 +656,7 @@ int ClothingManager::add(const std::string& path, std::string& err, bool deferFi
     if (onItemsChanged) onItemsChanged(); // vector may have reallocated
     auto t1 = now();
     if (!deferFit) {
-        applyType(idx, items_[idx].type, true); // anchor + size-to-body
+        applyType(idx, items_[idx].type); // type anchor (position only)
         refit(idx);
     }
     auto t2 = now();
@@ -828,7 +805,7 @@ std::string ClothingManager::detectType(const std::string& fileName) {
 
 namespace {
 // Axis-aligned bbox of the raw mesh bbox under rot*scale (8 corner transform —
-// cheap and tight enough for anchoring / width matching).
+// cheap and tight enough for anchoring).
 void bboxUnderRS(const ClothingItem& item, float scale, Vec3& outMn, Vec3& outMx) {
     Mat4 rs = Mat4::rotation(item.fitRot) * Mat4::scaling({scale, scale, scale});
     outMn = {1e30f, 1e30f, 1e30f};
@@ -845,7 +822,7 @@ void bboxUnderRS(const ClothingItem& item, float scale, Vec3& outMn, Vec3& outMx
 }
 } // namespace
 
-void ClothingManager::applyType(int index, const std::string& typeId, bool scaleToBody) {
+void ClothingManager::applyType(int index, const std::string& typeId) {
     if (index < 0 || index >= static_cast<int>(items_.size())) return;
     ClothingItem& item = items_[index];
     item.type = typeId;
@@ -854,70 +831,18 @@ void ClothingManager::applyType(int index, const std::string& typeId, bool scale
     if (!preset || typeId == "auto" || typeId == "accessory")
         return; // authored placement kept as-is
 
-    const std::vector<BodyPoint>& cloud = bodyCloud();
     float cx, cz;
     bodyAxisCenter(cx, cz);
 
-    auto anchor = [&](float scale, Vec3& outOff, Vec3& outMn, Vec3& outMx) {
-        bboxUnderRS(item, scale, outMn, outMx);
-        outOff.x = cx - (outMn.x + outMx.x) * 0.5f;
-        outOff.z = cz - (outMn.z + outMx.z) * 0.5f;
-        if (preset->bottomAlign)
-            outOff.y = preset->yOffset - outMn.y;
-        else
-            outOff.y = preset->yOffset - (outMn.y + outMx.y) * 0.5f;
-    };
-
-    float scale = item.fitScale;
-    if (scaleToBody && !cloud.empty()) {
-        // Provisional anchor at the authored unit scale to find the world
-        // height band; then match the garment width against the body width
-        // measured in that band (top 30% of the garment — waistband / chest —
-        // or the bottom part for shoes).
-        Vec3 off, mn, mx;
-        anchor(item.unitScale, off, mn, mx);
-        float h = mx.y - mn.y;
-        float y0, y1;
-        if (preset->bottomAlign) {
-            y0 = preset->yOffset;
-            y1 = preset->yOffset + std::max(0.12f, 0.5f * h);
-        } else if (typeId == "top" || typeId == "bra" || typeId == "dress") {
-            // chest band (cups), not the straps at the top of the bbox
-            float c = off.y + (mn.y + mx.y) * 0.5f;
-            y0 = c - 0.15f * h;
-            y1 = c + 0.15f * h;
-        } else {
-            // waistband area (top of the garment)
-            y1 = off.y + mx.y;
-            y0 = y1 - 0.3f * h;
-        }
-        float bodyW = bodyWidthInBand(y0, y1);
-        // garment width: radial 65th percentile of its vertices inside the band
-        float garmentW = 0.f;
-        {
-            Mat4 prov = Mat4::translation(off) * Mat4::rotation(item.fitRot) *
-                        Mat4::scaling({item.unitScale, item.unitScale, item.unitScale});
-            std::vector<float> radii;
-            for (const Mesh& m : item.model.meshes)
-                for (const Primitive& p : m.prims)
-                    for (const Vec3& v : p.pos) {
-                        Vec3 w = prov.transformPoint(v);
-                        if (w.y < y0 || w.y > y1) continue;
-                        float dx = w.x - cx, dz = w.z - cz;
-                        radii.push_back(dx * dx + dz * dz);
-                    }
-            if (radii.size() >= 16)
-                garmentW = 2.f * std::sqrt(percentile(radii, 0.65f));
-        }
-        if (bodyW > 0.01f && garmentW > 0.01f) {
-            float k = std::clamp(1.05f * bodyW / garmentW, 0.55f, 2.4f);
-            scale = item.unitScale * k;
-            item.fitScale = scale;
-        }
-    }
-
+    // anchor at the CURRENT scale — the user's size fit is never overridden
     Vec3 mn, mx;
-    anchor(scale, item.fitOffset, mn, mx);
+    bboxUnderRS(item, item.fitScale, mn, mx);
+    item.fitOffset.x = cx - (mn.x + mx.x) * 0.5f;
+    item.fitOffset.z = cz - (mn.z + mx.z) * 0.5f;
+    if (preset->bottomAlign)
+        item.fitOffset.y = preset->yOffset - mn.y;
+    else
+        item.fitOffset.y = preset->yOffset - (mn.y + mx.y) * 0.5f;
 }
 
 } // namespace ce

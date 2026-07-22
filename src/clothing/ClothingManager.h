@@ -99,11 +99,10 @@ public:
 
     // ---- clothing types with anchor offsets ----
     // Applies the type's anchor: centers the garment X/Z on the body axis and
-    // moves it to the type's target height. With scaleToBody=true (new
-    // placement, "Подогнать под тело") the garment is also uniformly scaled so
-    // its width matches the body width measured at the garment's top band.
-    // "auto"/"accessory" keep the authored placement. Call refit() after.
-    void applyType(int index, const std::string& typeId, bool scaleToBody = false);
+    // moves it to the type's target height. The scale is NOT touched — the
+    // user fits the size (gizmo / slider), presets store it. "auto"/"accessory"
+    // keep the authored placement entirely. Call refit() after.
+    void applyType(int index, const std::string& typeId);
 
     static std::string detectType(const std::string& fileName);
     // Equipment slot for a clothing type ("" = not slot-bound, coexists freely).
@@ -178,8 +177,6 @@ private:
     int knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq) const {
         return knnCloud(p, k, outIdx, outDistSq, cloud_, *grid_);
     }
-    // Body width (m) at a height band, arm points excluded; 0 when unknown.
-    float bodyWidthInBand(float y0, float y1) const;
     // Body center (x,z) of the cloud; falls back to origin when empty.
     void bodyAxisCenter(float& cx, float& cz) const;
 };
