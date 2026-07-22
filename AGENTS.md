@@ -50,7 +50,8 @@ CLI: `[model] [--model p] [--preset name] [--screenshot out.png] [--frames N] [-
   (`mode: value` → `axis*factor*(v-def)`, `mode: scale` → `axis*factor*(s-1)`).
 
 Вкладка «Тело» рисует bone-параметры сворачиваемыми секциями по `p.group`: «Фигура»
-(`breast_size`, `buttocks_size`, `hip_width`, `waist_size`, `weight` (hips+spine+chest+бедра+плечи),
+(`breast_size`, `buttocks_size`, `hip_width`, `waist_size`, `weight` (hips+spine+chest+бедра+плечи;
+у spine повышенный отклик X/Z `[1.5,0.4,1.3]` — талия расширяется сильнее груди/бёдер),
 `belly_abs`), «Рост» (`height` — ноги+спина по Y + подъём hips на `0.78*(s-1)`, чтобы ступни
 оставались на полу, `leg_length`, `arm_length`, `torso_length` — spine+chest по Y, compensate,
 ступни и так на месте, подъём не нужен), «Мышцы»: `muscle_arms`

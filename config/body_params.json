@@ -30,7 +30,7 @@
       "min": 0.85, "max": 1.2,
       "entries": [
         { "bones": ["J_Bip_C_Hips"],  "patterns": ["(?i)(hips|pelvis)$"],   "axes": [1.0, 0.4, 1.0], "compensate": true },
-        { "bones": ["J_Bip_C_Spine"], "patterns": ["(?i)spine_?1?$"],       "axes": [1.0, 0.4, 1.0], "compensate": true },
+        { "bones": ["J_Bip_C_Spine"], "patterns": ["(?i)spine_?1?$"],       "axes": [1.5, 0.4, 1.3], "compensate": true },
         { "bones": ["J_Bip_C_Chest"], "patterns": ["(?i)(^|[_ ])chest$"],   "axes": [1.0, 0.4, 1.0], "compensate": true },
         { "bones": ["J_Bip_L_UpperLeg", "J_Bip_R_UpperLeg"], "patterns": ["(?i)upper_?leg$", "(?i)thigh"], "axes": [0.8, 0.0, 0.8], "compensate": false },
         { "bones": ["J_Bip_L_UpperArm", "J_Bip_R_UpperArm"], "patterns": ["(?i)upper_?arm$"], "axes": [0.0, 0.8, 0.8], "compensate": false }
