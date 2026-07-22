@@ -364,6 +364,7 @@ void Application::applyClothingPreset(const nlohmann::json& items) {
                               e["fitOffset"][2].get<float>()};
         item.padding = e.value("padding", item.padding);
         item.shrink = e.value("shrink", item.shrink);
+        item.looseness = e.value("looseness", item.looseness);
         item.visible = e.value("visible", true);
         item.type = e.value("type", std::string{"auto"});
         item.slot = e.value("slot", ClothingManager::slotForType(item.type));

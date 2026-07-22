@@ -349,6 +349,15 @@ void EditorUI::drawClothingTab() {
             if (ImGui::SliderFloat("Обтяжка", &item.shrink, 0.f, 1.f)) {
                 if (cb.padClothing) cb.padClothing(i); // same cheap path
             }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Притянуть ткань к телу (с офсетом «Отступ»)");
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::SliderFloat("Свобода", &item.looseness, 0.f, 1.f)) {
+                if (cb.padClothing) cb.padClothing(i); // drape is precomputed, cheap
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Драпировка: ткань обволакивает, не повторяя анатомию\n"
+                                  "(не проваливается между грудей и в впадины)");
             float scale = item.fitScale;
             ImGui::SetNextItemWidth(-1);
             if (ImGui::SliderFloat("Масштаб", &scale, 0.2f, 3.f, "x%.3f")) {
@@ -395,6 +404,7 @@ nlohmann::json EditorUI::clothingToJson() const {
         e["fitOffset"] = {item.fitOffset.x, item.fitOffset.y, item.fitOffset.z};
         e["padding"] = item.padding;
         e["shrink"] = item.shrink;
+        e["looseness"] = item.looseness;
         e["visible"] = item.visible;
         e["type"] = item.type;
         e["slot"] = item.slot;
