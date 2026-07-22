@@ -270,7 +270,7 @@ void EditorUI::drawClothingTab() {
                 // (keep the current scale — only the height changes)
                 for (int i = 0; i < static_cast<int>(clothing->items().size()); ++i)
                     if (clothing->items()[i].type == t.id) {
-                        clothing->applyType(i, t.id, false);
+                        clothing->applyType(i, t.id);
                         if (cb.refitClothing) cb.refitClothing(i);
                     }
             }
@@ -329,7 +329,7 @@ void EditorUI::drawClothingTab() {
                 for (const ClothTypePreset& t : clothing->types()) {
                     bool selected = (t.id == item.type);
                     if (ImGui::Selectable(t.name.c_str(), selected)) {
-                        clothing->applyType(i, t.id, true);
+                        clothing->applyType(i, t.id);
                         if (cb.refitClothing) cb.refitClothing(i);
                     }
                     if (selected) ImGui::SetItemDefaultFocus();
@@ -375,12 +375,12 @@ void EditorUI::drawClothingTab() {
             if (ImGui::IsItemDeactivatedAfterEdit())
                 if (cb.refitClothing) cb.refitClothing(i);
             if (ImGui::Button("Подогнать под тело")) {
-                // deterministic re-placement: type anchor + size-to-body
-                clothing->applyType(i, item.type, true);
+                // re-anchor by type (position only — scale is the user's)
+                clothing->applyType(i, item.type);
                 if (cb.refitClothing) cb.refitClothing(i);
             }
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Сбросить посадку: якорь типа + размер по телу");
+                ImGui::SetTooltip("Переместить на якорь типа (масштаб сохраняется)");
             ImGui::SameLine();
             if (ImGui::Button("Удалить")) {
                 if (cb.removeClothing) cb.removeClothing(i);
