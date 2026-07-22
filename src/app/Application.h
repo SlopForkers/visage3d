@@ -8,6 +8,7 @@
 #include "render/Camera.h"
 #include "render/ModelRenderer.h"
 #include "ui/EditorUI.h"
+#include "ui/Gizmo3D.h"
 #include <string>
 #include <vector>
 
@@ -31,6 +32,7 @@ private:
     Presets presets_;
     ClothingManager clothing_;
     int bodySlot_ = -1;
+    Gizmo3D gizmo_;
 
     // debounced clothing refit on body-shape change
     uint64_t seenRevision_ = 0;
@@ -55,12 +57,14 @@ private:
     void applyPreset(const std::string& name);
     void saveScreenshot(const std::string& path);
     void resetCamera();
-    void handleInput(float dt);
+    void handleInput(float dt, bool mouseConsumed);
+    bool updateGizmo(int winW, int winH); // returns true when gizmo consumes the mouse
 
     // clothing pipeline (UI callbacks)
     void addClothing(const std::string& path);
     void refitClothing(int index);
     void padClothing(int index);
+    void liveFitClothing(int index);
     void removeClothing(int index);
     void setClothingVisible(int index, bool visible);
     void applyClothingPreset(const nlohmann::json& items);

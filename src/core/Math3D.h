@@ -44,6 +44,23 @@ struct Quat {
         float l = std::sqrt(x * x + y * y + z * z + w * w);
         return l > 1e-8f ? Quat{x / l, y / l, z / l, w / l} : Quat{};
     }
+    static Quat axisAngle(const Vec3& axis, float rad) {
+        float h = rad * 0.5f, s = std::sin(h);
+        Vec3 a = axis.normalized();
+        return {a.x * s, a.y * s, a.z * s, std::cos(h)};
+    }
+    Quat operator*(const Quat& o) const { // Hamilton product
+        return {w * o.x + x * o.w + y * o.z - z * o.y,
+                w * o.y - x * o.z + y * o.w + z * o.x,
+                w * o.z + x * o.y - y * o.x + z * o.w,
+                w * o.w - x * o.x - y * o.y - z * o.z};
+    }
+    Vec3 rotate(const Vec3& v) const { // q * v * q^-1 (unit q)
+        Vec3 qv{x, y, z};
+        Vec3 uv = qv.cross(v);
+        Vec3 uuv = qv.cross(uv);
+        return v + uv * (2.f * w) + uuv * 2.f;
+    }
 };
 
 // Column-major 3x3. m[col*3 + row]

@@ -158,11 +158,50 @@ void EditorUI::drawClothingTab() {
         ImGui::SetTooltip("Пересчитывать посадку одежды после изменения\n"
                           "параметров тела (с задержкой ~0.8 с)");
 
+    // ---- type anchors editor ----
+    if (ImGui::TreeNode("Якоря типов одежды")) {
+        ImGui::TextDisabled("Высота положения на теле:");
+        for (ClothTypePreset& t : clothing->types()) {
+            if (t.id == "auto") continue;
+            ImGui::PushID(t.id.c_str());
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::SliderFloat(t.name.c_str(), &t.yOffset, 0.f, 1.7f, "%.2f м")) {
+                clothing->saveTypes("config/clothing_types.json");
+                // re-apply the moved anchor to items wearing this type
+                for (int i = 0; i < static_cast<int>(clothing->items().size()); ++i)
+                    if (clothing->items()[i].type == t.id) {
+                        clothing->applyType(i, t.id);
+                        if (cb.refitClothing) cb.refitClothing(i);
+                    }
+            }
+            ImGui::PopID();
+        }
+        ImGui::TreePop();
+    }
+
     auto& items = clothing->items();
     if (items.empty()) {
         ImGui::TextDisabled("Нет одежды");
         return;
     }
+
+    // ---- gizmo mode ----
+    ImGui::TextDisabled("Gizmo:");
+    ImGui::SameLine();
+    auto modeButton = [&](const char* label, int m) {
+        bool active = gizmoMode == m;
+        if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ImGui::SmallButton(label)) gizmoMode = m;
+        if (active) ImGui::PopStyleColor();
+    };
+    modeButton("Перемещение", 0);
+    ImGui::SameLine();
+    modeButton("Вращение", 1);
+    ImGui::SameLine();
+    modeButton("Масштаб", 2);
+
+    if (selectedClothing >= static_cast<int>(items.size()))
+        selectedClothing = static_cast<int>(items.size()) - 1;
 
     for (int i = 0; i < static_cast<int>(items.size()); ++i) {
         ClothingItem& item = items[i];
@@ -174,10 +213,29 @@ void EditorUI::drawClothingTab() {
             if (cb.clothingVisible) cb.clothingVisible(i, vis);
         }
         ImGui::SameLine();
-        ImGui::TextUnformatted(item.name.c_str());
+        if (ImGui::Selectable(item.name.c_str(), selectedClothing == i))
+            selectedClothing = i;
         if (!item.weightsReady) {
             ImGui::SameLine();
             ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "(нет переноса весов)");
+        }
+
+        // type combo (anchor snap)
+        {
+            const ClothTypePreset* cur = clothing->typePreset(item.type);
+            std::string curName = cur ? cur->name : item.type;
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::BeginCombo("##type", curName.c_str())) {
+                for (const ClothTypePreset& t : clothing->types()) {
+                    bool selected = (t.id == item.type);
+                    if (ImGui::Selectable(t.name.c_str(), selected)) {
+                        clothing->applyType(i, t.id);
+                        if (cb.refitClothing) cb.refitClothing(i);
+                    }
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
         }
 
         if (ImGui::TreeNode("Подгонка")) {
@@ -195,14 +253,18 @@ void EditorUI::drawClothingTab() {
             ImGui::SetNextItemWidth(-1);
             if (ImGui::SliderFloat("Масштаб", &scale, 0.2f, 3.f, "x%.3f")) {
                 item.fitScale = scale;
-                if (cb.refitClothing) cb.refitClothing(i);
+                if (cb.liveFitClothing) cb.liveFitClothing(i); // live during drag
             }
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                if (cb.refitClothing) cb.refitClothing(i);
             float off[3] = {item.fitOffset.x, item.fitOffset.y, item.fitOffset.z};
             ImGui::SetNextItemWidth(-1);
             if (ImGui::SliderFloat3("Смещение", off, -0.5f, 0.5f, "%.3f м")) {
                 item.fitOffset = {off[0], off[1], off[2]};
-                if (cb.refitClothing) cb.refitClothing(i);
+                if (cb.liveFitClothing) cb.liveFitClothing(i);
             }
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                if (cb.refitClothing) cb.refitClothing(i);
             if (ImGui::Button("Подогнать под тело")) {
                 clothing->autoFitToBody(i);
                 if (cb.refitClothing) cb.refitClothing(i);
@@ -230,6 +292,8 @@ nlohmann::json EditorUI::clothingToJson() const {
         e["fitOffset"] = {item.fitOffset.x, item.fitOffset.y, item.fitOffset.z};
         e["padding"] = item.padding;
         e["visible"] = item.visible;
+        e["type"] = item.type;
+        e["fitRot"] = {item.fitRot.x, item.fitRot.y, item.fitRot.z, item.fitRot.w};
         arr.push_back(std::move(e));
     }
     return arr;

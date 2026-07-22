@@ -272,14 +272,20 @@ CMakeFiles/character_editor.dir/src/app/Application.cpp.obj: \
  D:/character_editor/src/render/Camera.h \
  D:/character_editor/src/render/ModelRenderer.h \
  D:/character_editor/src/render/Shader.h \
- D:/character_editor/src/ui/EditorUI.h D:/character_editor/src/core/GL.h \
+ D:/character_editor/src/ui/EditorUI.h \
+ D:/character_editor/src/ui/Gizmo3D.h \
+ D:/character_editor/external/imgui/imgui.h \
+ D:/character_editor/external/imgui/imconfig.h \
+ C:/mingw64/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include/float.h \
+ C:/mingw64/mingw64/x86_64-w64-mingw32/include/float.h \
+ C:/mingw64/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include/stdarg.h \
+ C:/mingw64/mingw64/x86_64-w64-mingw32/include/stdarg.h \
+ C:/mingw64/mingw64/x86_64-w64-mingw32/include/_mingw_stdarg.h \
+ D:/character_editor/src/core/GL.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/GL/gl.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/windows.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/sdkddkver.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/excpt.h \
- C:/mingw64/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include/stdarg.h \
- C:/mingw64/mingw64/x86_64-w64-mingw32/include/stdarg.h \
- C:/mingw64/mingw64/x86_64-w64-mingw32/include/_mingw_stdarg.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/windef.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/winapifamily.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/minwindef.h \
@@ -539,10 +545,6 @@ CMakeFiles/character_editor.dir/src/app/Application.cpp.obj: \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/GL/glext.h \
  C:/mingw64/mingw64/x86_64-w64-mingw32/include/KHR/khrplatform.h \
  D:/character_editor/external/glfw/include/GLFW/glfw3.h \
- D:/character_editor/external/imgui/imgui.h \
- D:/character_editor/external/imgui/imconfig.h \
- C:/mingw64/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include/float.h \
- C:/mingw64/mingw64/x86_64-w64-mingw32/include/float.h \
  D:/character_editor/external/imgui/backends/imgui_impl_glfw.h \
  D:/character_editor/external/imgui/backends/imgui_impl_opengl3.h \
  D:/character_editor/external/tinygltf/stb_image_write.h

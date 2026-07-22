@@ -133,11 +133,13 @@ bool Application::init(int argc, char** argv) {
     ui_.cb.resetCamera = [this]() { resetCamera(); };
     ui_.cb.refitClothing = [this](int i) { refitClothing(i); };
     ui_.cb.padClothing = [this](int i) { padClothing(i); };
+    ui_.cb.liveFitClothing = [this](int i) { liveFitClothing(i); };
     ui_.cb.removeClothing = [this](int i) { removeClothing(i); };
     ui_.cb.clothingVisible = [this](int i, bool v) { setClothingVisible(i, v); };
     ui_.cb.applyClothingPreset = [this](const nlohmann::json& j) { applyClothingPreset(j); };
 
     // ---- initial state ----
+    clothing_.loadTypes("config/clothing_types.json");
     if (!optModel_.empty()) loadModel(optModel_);
     if (listParams_) {
         for (const auto& p : controller_.params()) {
@@ -221,6 +223,7 @@ void Application::addClothing(const std::string& path) {
     ClothingItem& item = clothing_.items()[idx];
     item.renderSlot = renderer_.addModel(item.model, clothing_.bodySkinIndex());
     renderer_.setVisible(item.renderSlot, item.visible);
+    ui_.selectedClothing = idx; // gizmo targets the new item
     double t2 = glfwGetTime();
     std::fprintf(stderr, "Clothing '%s': fit %.2fs, upload %.2fs\n", item.name.c_str(), t1 - t0,
                  t2 - t1);
@@ -239,6 +242,41 @@ void Application::padClothing(int index) {
     if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
     clothing_.applyPadding(index);
     renderer_.syncVertices(clothing_.items()[index].renderSlot);
+}
+
+void Application::liveFitClothing(int index) {
+    if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
+    clothing_.applyFit(index);
+    renderer_.syncVertices(clothing_.items()[index].renderSlot);
+}
+
+bool Application::updateGizmo(int winW, int winH) {
+    int sel = ui_.selectedClothing;
+    if (sel < 0 || sel >= static_cast<int>(clothing_.items().size())) return false;
+    ClothingItem& item = clothing_.items()[sel];
+    if (!item.visible || item.renderSlot < 0) return false;
+
+    if (!gizmo_.dragging) { // sync working copies from the item
+        gizmo_.offset = item.fitOffset;
+        gizmo_.rot = item.fitRot;
+        gizmo_.scale = item.fitScale;
+    }
+    gizmo_.mode = static_cast<Gizmo3D::Mode>(ui_.gizmoMode);
+    Vec3 origin = item.fitMatrix().transformPoint(item.rawCenter);
+
+    bool changed, ended;
+    bool consumed = gizmo_.frame(winW, winH, camera_, origin, changed, ended);
+    if (changed) {
+        item.fitOffset = gizmo_.offset;
+        item.fitRot = gizmo_.rot;
+        item.fitScale = gizmo_.scale;
+        clothing_.applyFit(sel);
+        renderer_.syncVertices(item.renderSlot);
+    }
+    if (ended) refitClothing(sel);
+
+    gizmo_.draw(winW, winH, camera_);
+    return consumed;
 }
 
 void Application::removeClothing(int index) {
@@ -278,13 +316,18 @@ void Application::applyClothingPreset(const nlohmann::json& items) {
                               e["fitOffset"][2].get<float>()};
         item.padding = e.value("padding", item.padding);
         item.visible = e.value("visible", true);
+        item.type = e.value("type", std::string{"auto"});
+        if (e.contains("fitRot") && e["fitRot"].size() == 4)
+            item.fitRot = Quat{e["fitRot"][0].get<float>(), e["fitRot"][1].get<float>(),
+                               e["fitRot"][2].get<float>(), e["fitRot"][3].get<float>()}
+                              .normalized();
         clothing_.refit(idx); // re-transfer with stored fit params
         item.renderSlot = renderer_.addModel(item.model, clothing_.bodySkinIndex());
         renderer_.setVisible(item.renderSlot, item.visible);
     }
 }
 
-void Application::handleInput(float /*dt*/) {
+void Application::handleInput(float /*dt*/, bool mouseConsumed) {
     // file dropped onto the window
     if (!droppedFile().empty()) {
         loadModel(droppedFile());
@@ -292,7 +335,7 @@ void Application::handleInput(float /*dt*/) {
     }
 
     ImGuiIO& io = ImGui::GetIO();
-    if (io.WantCaptureMouse) return;
+    if (io.WantCaptureMouse || mouseConsumed) return;
 
     static double prevX = 0, prevY = 0;
     double x, y;
@@ -335,7 +378,8 @@ int Application::run() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        handleInput(dt);
+        bool gizmoConsumed = updateGizmo(winW, winH);
+        handleInput(dt, gizmoConsumed);
 
         skeleton_.update();
         if (controller_.morphsDirty) {

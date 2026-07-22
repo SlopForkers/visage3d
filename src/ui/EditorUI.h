@@ -18,6 +18,7 @@ struct UICallbacks {
     std::function<void()> resetCamera;
     std::function<void(int)> refitClothing;    // refit + GPU re-upload
     std::function<void(int)> padClothing;      // cheap padding update + upload
+    std::function<void(int)> liveFitClothing;  // cheap fit transform + upload (dragging)
     std::function<void(int)> removeClothing;   // remove slot + item
     std::function<void(int, bool)> clothingVisible;
     std::function<void(const nlohmann::json&)> applyClothingPreset;
@@ -37,6 +38,8 @@ public:
     bool hairVisible = true;
     float hairTint[3] = {1.f, 1.f, 1.f};
     bool autoRefit = true; // debounced clothing refit on body-shape change
+    int selectedClothing = -1; // gizmo target (index into ClothingManager::items)
+    int gizmoMode = 0;         // 0 translate, 1 rotate, 2 scale
     std::string status; // last operation result (error or info)
 
     void draw(int winW, int winH, float fps);

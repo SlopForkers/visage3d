@@ -624,6 +624,30 @@ src/ui/EditorUI.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/ui/EditorUI.cpp.s
 .PHONY : src/ui/EditorUI.cpp.s
 
+src/ui/Gizmo3D.obj: src/ui/Gizmo3D.cpp.obj
+.PHONY : src/ui/Gizmo3D.obj
+
+# target to build an object file
+src/ui/Gizmo3D.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/ui/Gizmo3D.cpp.obj
+.PHONY : src/ui/Gizmo3D.cpp.obj
+
+src/ui/Gizmo3D.i: src/ui/Gizmo3D.cpp.i
+.PHONY : src/ui/Gizmo3D.i
+
+# target to preprocess a source file
+src/ui/Gizmo3D.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/ui/Gizmo3D.cpp.i
+.PHONY : src/ui/Gizmo3D.cpp.i
+
+src/ui/Gizmo3D.s: src/ui/Gizmo3D.cpp.s
+.PHONY : src/ui/Gizmo3D.s
+
+# target to generate assembly for a file
+src/ui/Gizmo3D.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\character_editor.dir\build.make CMakeFiles/character_editor.dir/src/ui/Gizmo3D.cpp.s
+.PHONY : src/ui/Gizmo3D.cpp.s
+
 # Help Target
 help:
 	@echo The following are some of the valid targets for this Makefile:
@@ -693,6 +717,9 @@ help:
 	@echo ... src/ui/EditorUI.obj
 	@echo ... src/ui/EditorUI.i
 	@echo ... src/ui/EditorUI.s
+	@echo ... src/ui/Gizmo3D.obj
+	@echo ... src/ui/Gizmo3D.i
+	@echo ... src/ui/Gizmo3D.s
 .PHONY : help
 
 

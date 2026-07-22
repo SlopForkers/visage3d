@@ -25,6 +25,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/character_editor.dir/src/render/Shader.cpp.obj.d"
   "CMakeFiles/character_editor.dir/src/ui/EditorUI.cpp.obj"
   "CMakeFiles/character_editor.dir/src/ui/EditorUI.cpp.obj.d"
+  "CMakeFiles/character_editor.dir/src/ui/Gizmo3D.cpp.obj"
+  "CMakeFiles/character_editor.dir/src/ui/Gizmo3D.cpp.obj.d"
   "character_editor.exe"
   "character_editor.exe.manifest"
   "character_editor.pdb"

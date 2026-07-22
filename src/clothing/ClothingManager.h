@@ -15,13 +15,24 @@ struct ClothingItem {
     Model model;           // loaded mesh, node transforms baked into vertices
     int renderSlot = -1;
 
-    // fit transform: worldPos = rawPos * fitScale + fitOffset
+    // fit transform: worldPos = fitRot * (rawPos * fitScale) + fitOffset
     float fitScale = 1.f;
     float unitScale = 1.f; // auto-detected unit conversion (for UI hints)
+    Quat fitRot{};          // rotation (gizmo)
     Vec3 fitOffset{0, 0, 0};
+
+    Mat4 fitMatrix() const {
+        return Mat4::translation(fitOffset) * Mat4::rotation(fitRot) *
+               Mat4::scaling({fitScale, fitScale, fitScale});
+    }
+    Mat4 fitMatrixNoTrans() const {
+        return Mat4::rotation(fitRot) * Mat4::scaling({fitScale, fitScale, fitScale});
+    }
     float padding = 0.004f; // surface offset (m) against body poke-through
     float shrink = 0.f;     // 0..1 shrink-wrap towards the body surface
     bool visible = true;
+    std::string type = "auto"; // clothing type id ("auto" = keep authored position)
+    Vec3 rawCenter{0, 0, 0};   // bbox center in raw space (gizmo pivot)
 
     bool weightsReady = false; // false until transferWeights succeeded
 
@@ -32,6 +43,16 @@ struct ClothingItem {
         std::vector<Vec3> targetPos; // nearest body surface point
     };
     std::vector<std::vector<PrimFit>> fits; // [mesh][prim]
+};
+
+// A clothing-type anchor preset: where a garment of this type should sit on
+// the body. yOffset is the target height (m) of the garment bbox center
+// (or bbox bottom when bottomAlign=true, e.g. shoes on the ground).
+struct ClothTypePreset {
+    std::string id;   // "panties"
+    std::string name; // "Трусы"
+    float yOffset = 0.9f;
+    bool bottomAlign = false;
 };
 
 // Owns clothing items and the auto-fitting pipeline:
@@ -54,10 +75,24 @@ public:
     void refit(int index);
     // Cheap: re-applies padding/shrink from stored basePos/pushDir/targetPos
     void applyPadding(int index);
+    // Cheap: re-transforms vertices with the current fit matrix (gizmo dragging);
+    // clamps against stored (stale) targets. Call refit() on release.
+    void applyFit(int index);
 
     // Coordinate-descent fit: searches scale + offset minimizing the mean
     // distance from clothing vertices to the body surface.
     void autoFitToBody(int index);
+
+    // ---- clothing types with anchor offsets ----
+    // Applies the type's anchor: centers the garment X/Z and moves it to the
+    // type's target height. "auto" keeps the current fit. Call refit() after.
+    void applyType(int index, const std::string& typeId);
+    std::string detectType(const std::string& fileName) const;
+    const std::vector<ClothTypePreset>& types() const { return types_; }
+    std::vector<ClothTypePreset>& types() { return types_; }
+    const ClothTypePreset* typePreset(const std::string& typeId) const;
+    void loadTypes(const std::string& configPath); // missing file -> builtins
+    bool saveTypes(const std::string& configPath) const;
 
     std::vector<ClothingItem>& items() { return items_; }
     const std::vector<ClothingItem>& items() const { return items_; }
@@ -69,6 +104,7 @@ private:
     Model* body_ = nullptr;
     Skeleton* skeleton_ = nullptr;
     std::vector<ClothingItem> items_;
+    std::vector<ClothTypePreset> types_;
     int bodySkinIndex_ = -1;
 
     void bakeNodeTransforms(Model& model);
