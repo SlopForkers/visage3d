@@ -1,5 +1,6 @@
 #include "app/Application.h"
 #include "core/GL.h"
+#include "model/GltfExporter.h"
 
 #include <GLFW/glfw3.h>
 #include "imgui.h"
@@ -91,6 +92,7 @@ bool Application::init(int argc, char** argv) {
         else if (a == "--dist") optDist_ = std::atof(next().c_str());
         else if (a == "--targety") optTargetY_ = std::atof(next().c_str());
         else if (a == "--clothe") optClothes_.push_back(next());
+        else if (a == "--export") optExport_ = next();
         else if (a == "--listparams") listParams_ = true;
         else if (a == "--set") {
             std::string s = next(); // id=value
@@ -171,6 +173,7 @@ bool Application::init(int argc, char** argv) {
     ui_.clothing = &clothing_;
     ui_.catalog = &catalog_;
     ui_.cb.openModel = [this](const std::string& p) { loadModel(p); };
+    ui_.cb.exportModel = [this](const std::string& p) { exportModel(p); };
     ui_.cb.wearClothing = [this](const std::string& p) { wearClothing(p); };
     ui_.cb.rescanCatalog = [this]() {
         std::string fn = bodyModelPath_;
@@ -211,6 +214,13 @@ bool Application::init(int argc, char** argv) {
     if (!optPreset_.empty()) applyPreset(optPreset_);
     for (const auto& kv : optSet_) controller_.setValue(kv.first, kv.second);
     for (const std::string& c : optClothes_) addClothing(c);
+    if (!optExport_.empty()) {
+        // stamp the current state (morph blend + effectors) before baking
+        skeleton_.update();
+        renderer_.syncVertices(bodySlot_);
+        controller_.applyEffectorsToMesh();
+        exportModel(optExport_);
+    }
     camera_.yaw = optYawDeg_ * 0.01745329252f;
     if (optDist_ > 0.f) camera_.distance = optDist_;
     if (optTargetY_ > 0.f) camera_.target.y = optTargetY_;
@@ -377,6 +387,18 @@ void Application::clearClothing() {
     for (ClothingItem& item : clothing_.items())
         if (item.renderSlot >= 0) renderer_.removeModel(item.renderSlot);
     clothing_.clear();
+}
+
+void Application::exportModel(const std::string& path) {
+    std::string err;
+    // blendedPos/blendedNormal hold the current visual state (morphs +
+    // effectors); the frame loop keeps them fresh — no re-stamping here
+    if (exportGlb(path, model_, skeleton_, clothing_.items(), clothing_.bodySkinIndex(),
+                  err)) {
+        ui_.status = "Экспортировано: " + path;
+    } else {
+        ui_.status = "Экспорт не удался: " + err;
+    }
 }
 
 void Application::applyClothingPreset(const nlohmann::json& items) {

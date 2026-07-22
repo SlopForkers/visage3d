@@ -10,4 +10,9 @@ namespace ce {
 std::vector<std::string> openFileDialog(const wchar_t* title, const wchar_t* filter,
                                         bool multi = false);
 
+// Native Windows save-file dialog (GetSaveFileNameW). defExt e.g. L"glb" is
+// appended when the user types no extension. Empty string = cancelled.
+std::string saveFileDialog(const wchar_t* title, const wchar_t* filter,
+                           const wchar_t* defExt);
+
 } // namespace ce

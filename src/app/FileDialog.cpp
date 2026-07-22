@@ -54,12 +54,27 @@ std::vector<std::string> openFileDialog(const wchar_t* title, const wchar_t* fil
     return out;
 }
 
+std::string saveFileDialog(const wchar_t* title, const wchar_t* filter, const wchar_t* defExt) {
+    std::vector<wchar_t> buf(65536, L'\0');
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.lpstrTitle = title;
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile = buf.data();
+    ofn.nMaxFile = static_cast<DWORD>(buf.size());
+    ofn.lpstrDefExt = defExt;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_EXPLORER | OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+    if (!GetSaveFileNameW(&ofn)) return {};
+    return toUtf8(buf.data());
+}
+
 } // namespace ce
 
 #else
 
 namespace ce {
 std::vector<std::string> openFileDialog(const wchar_t*, const wchar_t*, bool) { return {}; }
+std::string saveFileDialog(const wchar_t*, const wchar_t*, const wchar_t*) { return {}; }
 } // namespace ce
 
 #endif
