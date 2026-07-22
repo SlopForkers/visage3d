@@ -1,4 +1,5 @@
 #pragma once
+#include "clothing/ClothingCatalog.h"
 #include "clothing/ClothingManager.h"
 #include "editor/Presets.h"
 #include "editor/ShapeController.h"
@@ -31,6 +32,8 @@ private:
     EditorUI ui_;
     Presets presets_;
     ClothingManager clothing_;
+    ClothingCatalog catalog_;
+    std::string bodyModelPath_; // loaded body model (excluded from the catalog)
     int bodySlot_ = -1;
     Gizmo3D gizmo_;
 
@@ -62,6 +65,7 @@ private:
 
     // clothing pipeline (UI callbacks)
     void addClothing(const std::string& path);
+    void wearClothing(const std::string& path); // add + unequip the slot's previous item
     void refitClothing(int index);
     void padClothing(int index);
     void liveFitClothing(int index);

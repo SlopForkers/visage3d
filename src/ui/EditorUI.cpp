@@ -139,8 +139,8 @@ void EditorUI::drawHairTab() {
     ImGui::Checkbox("Показывать волосы", &hairVisible);
     ImGui::ColorEdit3("Цвет волос", hairTint);
     ImGui::Spacing();
-    ImGui::TextDisabled("Своя причёска: загрузите меш волос\nна вкладке «Одежда» —\n"
-                        "веса перенесутся на кость головы\nавтоматически.");
+    ImGui::TextDisabled("Своя причёска: наденьте меш волос\nиз каталога на вкладке «Одежда» —\n"
+                        "веса перенесутся на кость головы\nавтоматически (слот «Причёска»).");
 }
 
 void EditorUI::drawClothingTab() {
@@ -149,7 +149,7 @@ void EditorUI::drawClothingTab() {
         std::vector<std::string> files = openFileDialog(
             L"Добавить одежду", L"glTF / VRM\0*.vrm;*.glb;*.gltf\0Все файлы\0*.*\0", true);
         for (const std::string& f : files)
-            if (cb.openClothing) cb.openClothing(f);
+            if (cb.wearClothing) cb.wearClothing(f);
     }
     ImGui::TextDisabled("Веса переносятся с тела автоматически.\n"
                         "Одежда повторяет изменения фигуры.");
@@ -158,19 +158,97 @@ void EditorUI::drawClothingTab() {
         ImGui::SetTooltip("Пересчитывать посадку одежды после изменения\n"
                           "параметров тела (с задержкой ~0.8 с)");
 
+    // ---- equipment slots ----
+    if (ImGui::TreeNodeEx("Слоты", ImGuiTreeNodeFlags_DefaultOpen)) {
+        auto& items = clothing->items();
+        bool any = false;
+        for (const ClothingManager::SlotDef& s : clothing->slots()) {
+            int idx = clothing->itemInSlot(s.id);
+            ImGui::PushID(s.id.c_str());
+            ImGui::TextDisabled("%s:", s.name.c_str());
+            ImGui::SameLine(90);
+            if (idx < 0) {
+                ImGui::TextDisabled("—");
+            } else {
+                any = true;
+                if (ImGui::SmallButton("x")) {
+                    if (cb.removeClothing) cb.removeClothing(idx);
+                    ImGui::PopID();
+                    continue;
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Снять");
+                ImGui::SameLine();
+                if (ImGui::Selectable(items[idx].name.c_str(), selectedClothing == idx))
+                    selectedClothing = idx;
+            }
+            ImGui::PopID();
+        }
+        if (!any) ImGui::TextDisabled("Слоты пусты — наденьте из каталога");
+        ImGui::TreePop();
+    }
+
+    // ---- catalog of garments found in models/ ----
+    if (catalog && ImGui::TreeNodeEx("Каталог", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::SmallButton("Обновить"))
+            if (cb.rescanCatalog) cb.rescanCatalog();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Пересканировать папку %s/", catalog->dir().c_str());
+        if (catalog->entries().empty()) {
+            ImGui::TextDisabled("В папке %s/ нет моделей (.gltf/.glb/.vrm)",
+                                catalog->dir().c_str());
+        } else {
+            // group by slot category, in slot order; slot-less items last
+            auto slotName = [&](const std::string& slotId) -> std::string {
+                for (const ClothingManager::SlotDef& s : clothing->slots())
+                    if (s.id == slotId) return s.name;
+                return "Прочее";
+            };
+            std::vector<std::string> order;
+            for (const ClothingManager::SlotDef& s : clothing->slots()) order.push_back(s.id);
+            order.push_back("");
+            auto& items = clothing->items();
+            for (const std::string& slotId : order) {
+                bool any = false;
+                for (const CatalogEntry& e : catalog->entries())
+                    if (e.slot == slotId) { any = true; break; }
+                if (!any) continue;
+                if (!ImGui::TreeNode(slotName(slotId).c_str())) continue; // group collapsed
+                for (const CatalogEntry& e : catalog->entries()) {
+                    if (e.slot != slotId) continue;
+                    bool worn = false;
+                    for (const ClothingItem& it : items)
+                        if (it.path == e.path) { worn = true; break; }
+                    ImGui::PushID(e.path.c_str());
+                    if (worn) {
+                        ImGui::Bullet();
+                        ImGui::SameLine();
+                        ImGui::TextDisabled("%s", e.name.c_str());
+                    } else if (ImGui::Selectable(e.name.c_str())) {
+                        if (cb.wearClothing) cb.wearClothing(e.path);
+                    }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", e.path.c_str());
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+        }
+        ImGui::TreePop();
+    }
+
     // ---- type anchors editor ----
     if (ImGui::TreeNode("Якоря типов одежды")) {
         ImGui::TextDisabled("Высота положения на теле:");
         for (ClothTypePreset& t : clothing->types()) {
-            if (t.id == "auto") continue;
+            if (t.id == "auto" || t.id == "accessory") continue;
             ImGui::PushID(t.id.c_str());
             ImGui::SetNextItemWidth(-1);
             if (ImGui::SliderFloat(t.name.c_str(), &t.yOffset, 0.f, 1.7f, "%.2f м")) {
                 clothing->saveTypes("config/clothing_types.json");
                 // re-apply the moved anchor to items wearing this type
+                // (keep the current scale — only the height changes)
                 for (int i = 0; i < static_cast<int>(clothing->items().size()); ++i)
                     if (clothing->items()[i].type == t.id) {
-                        clothing->applyType(i, t.id);
+                        clothing->applyType(i, t.id, false);
                         if (cb.refitClothing) cb.refitClothing(i);
                     }
             }
@@ -220,7 +298,7 @@ void EditorUI::drawClothingTab() {
             ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "(нет переноса весов)");
         }
 
-        // type combo (anchor snap)
+        // type combo (anchor snap + size-to-body)
         {
             const ClothTypePreset* cur = clothing->typePreset(item.type);
             std::string curName = cur ? cur->name : item.type;
@@ -229,7 +307,7 @@ void EditorUI::drawClothingTab() {
                 for (const ClothTypePreset& t : clothing->types()) {
                     bool selected = (t.id == item.type);
                     if (ImGui::Selectable(t.name.c_str(), selected)) {
-                        clothing->applyType(i, t.id);
+                        clothing->applyType(i, t.id, true);
                         if (cb.refitClothing) cb.refitClothing(i);
                     }
                     if (selected) ImGui::SetItemDefaultFocus();
@@ -266,9 +344,12 @@ void EditorUI::drawClothingTab() {
             if (ImGui::IsItemDeactivatedAfterEdit())
                 if (cb.refitClothing) cb.refitClothing(i);
             if (ImGui::Button("Подогнать под тело")) {
-                clothing->autoFitToBody(i);
+                // deterministic re-placement: type anchor + size-to-body
+                clothing->applyType(i, item.type, true);
                 if (cb.refitClothing) cb.refitClothing(i);
             }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Сбросить посадку: якорь типа + размер по телу");
             ImGui::SameLine();
             if (ImGui::Button("Удалить")) {
                 if (cb.removeClothing) cb.removeClothing(i);
@@ -291,8 +372,10 @@ nlohmann::json EditorUI::clothingToJson() const {
         e["fitScale"] = item.fitScale;
         e["fitOffset"] = {item.fitOffset.x, item.fitOffset.y, item.fitOffset.z};
         e["padding"] = item.padding;
+        e["shrink"] = item.shrink;
         e["visible"] = item.visible;
         e["type"] = item.type;
+        e["slot"] = item.slot;
         e["fitRot"] = {item.fitRot.x, item.fitRot.y, item.fitRot.z, item.fitRot.w};
         arr.push_back(std::move(e));
     }

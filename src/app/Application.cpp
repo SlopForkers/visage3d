@@ -127,8 +127,15 @@ bool Application::init(int argc, char** argv) {
     ui_.presets = &presets_;
     ui_.model = &model_;
     ui_.clothing = &clothing_;
+    ui_.catalog = &catalog_;
     ui_.cb.openModel = [this](const std::string& p) { loadModel(p); };
-    ui_.cb.openClothing = [this](const std::string& p) { addClothing(p); };
+    ui_.cb.wearClothing = [this](const std::string& p) { wearClothing(p); };
+    ui_.cb.rescanCatalog = [this]() {
+        std::string fn = bodyModelPath_;
+        size_t slash = fn.find_last_of("/\\");
+        catalog_.scan("models", slash == std::string::npos ? fn : fn.substr(slash + 1));
+        ui_.status = "Каталог обновлён";
+    };
     ui_.cb.saveScreenshot = [this](const std::string& p) { saveScreenshot(p); };
     ui_.cb.resetCamera = [this]() { resetCamera(); };
     ui_.cb.refitClothing = [this](int i) { refitClothing(i); };
@@ -138,8 +145,20 @@ bool Application::init(int argc, char** argv) {
     ui_.cb.clothingVisible = [this](int i, bool v) { setClothingVisible(i, v); };
     ui_.cb.applyClothingPreset = [this](const nlohmann::json& j) { applyClothingPreset(j); };
 
+    // The renderer holds Model* into clothing_.items(): re-point them
+    // whenever the vector reallocates or shifts (add/remove/clear).
+    clothing_.onItemsChanged = [this] {
+        for (ClothingItem& item : clothing_.items())
+            if (item.renderSlot >= 0) renderer_.setModel(item.renderSlot, &item.model);
+    };
+
     // ---- initial state ----
     clothing_.loadTypes("config/clothing_types.json");
+    {
+        std::string fn = optModel_;
+        size_t slash = fn.find_last_of("/\\");
+        catalog_.scan("models", slash == std::string::npos ? fn : fn.substr(slash + 1));
+    }
     if (!optModel_.empty()) loadModel(optModel_);
     if (listParams_) {
         for (const auto& p : controller_.params()) {
@@ -175,6 +194,7 @@ bool Application::loadModel(const std::string& path) {
     }
 
     model_ = std::move(newModel);
+    bodyModelPath_ = path;
     skeleton_.bind(model_);
     controller_.bind(model_, skeleton_);
     controller_.scan("config/body_params.json");
@@ -230,6 +250,28 @@ void Application::addClothing(const std::string& path) {
     ui_.status = "Одежда добавлена: " + item.name;
 }
 
+// Wear a garment from the catalog / file dialog: the previous item occupying
+// the same equipment slot (top / bottom / shoes / hair / accessory) is
+// unequipped. Slot-free items ("auto") coexist freely. The old item is kept
+// when the new one fails to load.
+void Application::wearClothing(const std::string& path) {
+    std::string slot = ClothingManager::slotForType(ClothingManager::detectType(path));
+    size_t before = clothing_.items().size();
+    addClothing(path);
+    if (clothing_.items().size() == before) return; // load failed
+    int newIdx = static_cast<int>(clothing_.items().size()) - 1;
+    if (!slot.empty()) {
+        std::vector<int> toRemove;
+        for (int i = 0; i < newIdx; ++i)
+            if (clothing_.items()[i].slot == slot) toRemove.push_back(i);
+        for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it) {
+            removeClothing(*it);
+            if (*it < newIdx) --newIdx;
+        }
+        ui_.selectedClothing = newIdx;
+    }
+}
+
 void Application::refitClothing(int index) {
     if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
     clothing_.refit(index);
@@ -283,6 +325,11 @@ void Application::removeClothing(int index) {
     if (index < 0 || index >= static_cast<int>(clothing_.items().size())) return;
     renderer_.removeModel(clothing_.items()[index].renderSlot);
     clothing_.remove(index);
+    // keep the gizmo target valid after the index shift
+    if (ui_.selectedClothing == index)
+        ui_.selectedClothing = -1;
+    else if (ui_.selectedClothing > index)
+        --ui_.selectedClothing;
     ui_.status = "Одежда удалена";
 }
 
@@ -304,7 +351,8 @@ void Application::applyClothingPreset(const nlohmann::json& items) {
         std::string path = e.value("path", std::string{});
         if (path.empty()) continue;
         std::string err;
-        int idx = clothing_.add(path, err);
+        // deferFit: placement runs once, with the stored fit params (not twice)
+        int idx = clothing_.add(path, err, true);
         if (idx < 0) {
             ui_.status = "Не найдена одежда пресета: " + path;
             continue;
@@ -315,8 +363,10 @@ void Application::applyClothingPreset(const nlohmann::json& items) {
             item.fitOffset = {e["fitOffset"][0].get<float>(), e["fitOffset"][1].get<float>(),
                               e["fitOffset"][2].get<float>()};
         item.padding = e.value("padding", item.padding);
+        item.shrink = e.value("shrink", item.shrink);
         item.visible = e.value("visible", true);
         item.type = e.value("type", std::string{"auto"});
+        item.slot = e.value("slot", ClothingManager::slotForType(item.type));
         if (e.contains("fitRot") && e["fitRot"].size() == 4)
             item.fitRot = Quat{e["fitRot"][0].get<float>(), e["fitRot"][1].get<float>(),
                                e["fitRot"][2].get<float>(), e["fitRot"][3].get<float>()}
@@ -392,6 +442,7 @@ int Application::run() {
         // debounced clothing refit (fits adapt to the new body shape)
         if (controller_.revision != seenRevision_) {
             seenRevision_ = controller_.revision;
+            clothing_.invalidateBody(); // rebuild the shared point cloud once
             refitAt_ = now + 0.75;
         }
         if (ui_.autoRefit && refitAt_ > 0.0 && now >= refitAt_ &&

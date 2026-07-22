@@ -1,4 +1,5 @@
 #pragma once
+#include "clothing/ClothingCatalog.h"
 #include "clothing/ClothingManager.h"
 #include "editor/Presets.h"
 #include "editor/ShapeController.h"
@@ -13,7 +14,8 @@ namespace ce {
 
 struct UICallbacks {
     std::function<void(const std::string&)> openModel;      // via native dialog
-    std::function<void(const std::string&)> openClothing;   // path (already chosen)
+    std::function<void(const std::string&)> wearClothing;   // wear (replaces slot content)
+    std::function<void()> rescanCatalog;                    // rescan the models/ dir
     std::function<void(const std::string&)> saveScreenshot; // path
     std::function<void()> resetCamera;
     std::function<void(int)> refitClothing;    // refit + GPU re-upload
@@ -31,6 +33,7 @@ public:
     Presets* presets = nullptr;
     Model* model = nullptr;
     ClothingManager* clothing = nullptr;
+    ClothingCatalog* catalog = nullptr;
     UICallbacks cb;
 
     bool showGrid = true;

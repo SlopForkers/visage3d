@@ -52,22 +52,22 @@ bool Shader::compile(const char* vsSrc, const char* fsSrc, std::string& error) {
 void Shader::use() const { glUseProgram(prog_); }
 
 void Shader::setMat4(const char* name, const Mat4& m) const {
-    glUniformMatrix4fv(glGetUniformLocation(prog_, name), 1, GL_FALSE, m.m);
+    glUniformMatrix4fv(loc(name), 1, GL_FALSE, m.m);
 }
 void Shader::setMat3(const char* name, const Mat3& m) const {
-    glUniformMatrix3fv(glGetUniformLocation(prog_, name), 1, GL_FALSE, m.m);
+    glUniformMatrix3fv(loc(name), 1, GL_FALSE, m.m);
 }
 void Shader::setVec3(const char* name, const Vec3& v) const {
-    glUniform3f(glGetUniformLocation(prog_, name), v.x, v.y, v.z);
+    glUniform3f(loc(name), v.x, v.y, v.z);
 }
 void Shader::setVec4(const char* name, const Vec4& v) const {
-    glUniform4f(glGetUniformLocation(prog_, name), v.x, v.y, v.z, v.w);
+    glUniform4f(loc(name), v.x, v.y, v.z, v.w);
 }
 void Shader::setFloat(const char* name, float v) const {
-    glUniform1f(glGetUniformLocation(prog_, name), v);
+    glUniform1f(loc(name), v);
 }
 void Shader::setInt(const char* name, int v) const {
-    glUniform1i(glGetUniformLocation(prog_, name), v);
+    glUniform1i(loc(name), v);
 }
 
 } // namespace ce

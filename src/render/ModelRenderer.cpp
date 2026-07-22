@@ -145,21 +145,29 @@ unsigned ModelRenderer::uploadTexture(const Texture& tex) {
 }
 
 void ModelRenderer::uploadVertices(GpuPrim& gp, const Primitive& prim) {
-    std::vector<float> buf(gp.vertexCount * 6);
+    // reuse the staging buffer: per-frame uploads (gizmo drags, morphs) must
+    // not allocate several MB every call
+    if (stage_.size() < gp.vertexCount * 6) stage_.resize(gp.vertexCount * 6);
+    float* buf = stage_.data();
     const std::vector<Vec3>& pos = prim.blendedPos.empty() ? prim.pos : prim.blendedPos;
     const std::vector<Vec3>& nrm = prim.blendedNormal.empty() ? prim.normal : prim.blendedNormal;
+    const bool hasNrm = nrm.size() == pos.size();
     for (size_t v = 0; v < gp.vertexCount; ++v) {
         buf[v * 6 + 0] = pos[v].x;
         buf[v * 6 + 1] = pos[v].y;
         buf[v * 6 + 2] = pos[v].z;
-        if (v < nrm.size()) {
+        if (hasNrm) {
             buf[v * 6 + 3] = nrm[v].x;
             buf[v * 6 + 4] = nrm[v].y;
             buf[v * 6 + 5] = nrm[v].z;
+        } else {
+            buf[v * 6 + 3] = 0.f;
+            buf[v * 6 + 4] = 1.f;
+            buf[v * 6 + 5] = 0.f;
         }
     }
     glBindBuffer(GL_ARRAY_BUFFER, gp.vboDyn);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, buf.size() * sizeof(float), buf.data());
+    glBufferSubData(GL_ARRAY_BUFFER, 0, gp.vertexCount * 6 * sizeof(float), buf);
 }
 
 namespace {
@@ -332,6 +340,11 @@ void ModelRenderer::setVisible(int slotId, bool visible) {
     slots_[slotId].visible = visible;
 }
 
+void ModelRenderer::setModel(int slotId, Model* model) {
+    if (slotId < 0 || slotId >= static_cast<int>(slots_.size())) return;
+    slots_[slotId].model = model;
+}
+
 bool ModelRenderer::hasModel() const {
     for (const auto& s : slots_)
         if (s.model && s.visible) return true;
@@ -408,8 +421,7 @@ void ModelRenderer::drawSlot(GpuModelData& slot, const Skeleton& skeleton,
             for (int i = 0; i < nb; ++i)
                 boneMats_[i] = skeleton.world()[skin.joints[i]] * skin.inverseBindMatrices[i];
             modelShader_.setInt("uUseSkin", 1);
-            glUniformMatrix4fv(glGetUniformLocation(modelShader_.id(), "uBones"), nb, GL_FALSE,
-                               boneMats_[0].m);
+            glUniformMatrix4fv(modelShader_.location("uBones"), nb, GL_FALSE, boneMats_[0].m);
         }
 
         for (const GpuPrim& gp : gm.prims) {
