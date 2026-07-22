@@ -21,6 +21,7 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "D:/character_editor/src/render/ModelRenderer.cpp" "CMakeFiles/character_editor.dir/src/render/ModelRenderer.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/render/ModelRenderer.cpp.obj.d"
   "D:/character_editor/src/render/Shader.cpp" "CMakeFiles/character_editor.dir/src/render/Shader.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/render/Shader.cpp.obj.d"
   "D:/character_editor/src/ui/EditorUI.cpp" "CMakeFiles/character_editor.dir/src/ui/EditorUI.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/ui/EditorUI.cpp.obj.d"
+  "D:/character_editor/src/ui/Gizmo3D.cpp" "CMakeFiles/character_editor.dir/src/ui/Gizmo3D.cpp.obj" "gcc" "CMakeFiles/character_editor.dir/src/ui/Gizmo3D.cpp.obj.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

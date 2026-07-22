@@ -272,4 +272,12 @@ CMakeFiles/character_editor.dir/src/main.cpp.obj: \
  D:/character_editor/src/render/Camera.h \
  D:/character_editor/src/render/ModelRenderer.h \
  D:/character_editor/src/render/Shader.h \
- D:/character_editor/src/ui/EditorUI.h
+ D:/character_editor/src/ui/EditorUI.h \
+ D:/character_editor/src/ui/Gizmo3D.h \
+ D:/character_editor/external/imgui/imgui.h \
+ D:/character_editor/external/imgui/imconfig.h \
+ C:/mingw64/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include/float.h \
+ C:/mingw64/mingw64/x86_64-w64-mingw32/include/float.h \
+ C:/mingw64/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include/stdarg.h \
+ C:/mingw64/mingw64/x86_64-w64-mingw32/include/stdarg.h \
+ C:/mingw64/mingw64/x86_64-w64-mingw32/include/_mingw_stdarg.h

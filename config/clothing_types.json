@@ -1,0 +1,15 @@
+{
+  "comment": "Якоря типов одежды: yOffset — целевая высота центра bbox одежды на теле (м); bottomAlign — выравнивание низа bbox по yOffset (для обуви). Применяется при выборе типа у предмета одежды.",
+  "types": [
+    { "id": "auto",    "name": "Авто (как сшито)", "yOffset": 0.0,  "bottomAlign": false },
+    { "id": "panties", "name": "Трусы",            "yOffset": 0.92, "bottomAlign": false },
+    { "id": "shorts",  "name": "Шорты",            "yOffset": 0.8,  "bottomAlign": false },
+    { "id": "pants",   "name": "Штаны / брюки",    "yOffset": 0.52, "bottomAlign": false },
+    { "id": "skirt",   "name": "Юбка",             "yOffset": 0.8,  "bottomAlign": false },
+    { "id": "top",     "name": "Топ / футболка",   "yOffset": 1.22, "bottomAlign": false },
+    { "id": "bra",     "name": "Лиф / бюстгальтер", "yOffset": 1.26, "bottomAlign": false },
+    { "id": "dress",   "name": "Платье",           "yOffset": 0.95, "bottomAlign": false },
+    { "id": "shoes",   "name": "Обувь",            "yOffset": 0.0,  "bottomAlign": true },
+    { "id": "head",    "name": "Голова / волосы",  "yOffset": 1.45, "bottomAlign": false }
+  ]
+}

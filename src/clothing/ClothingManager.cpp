@@ -1,10 +1,12 @@
 #include "clothing/ClothingManager.h"
 #include "model/GltfLoader.h"
+#include "json.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <functional>
 #include <thread>
 #include <unordered_map>
@@ -179,9 +181,10 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
             fit.pushDir.resize(nv);
             fit.targetPos.resize(nv);
 
+            const Mat4 fitM = item.fitMatrix();
             // per-vertex worker (thread-safe: writes only own slot)
             auto process = [&](size_t v) {
-                Vec3 cp = prim.pos[v] * item.fitScale + item.fitOffset;
+                Vec3 cp = fitM.transformPoint(prim.pos[v]);
 
                 // k nearest body points: rings 1-2 of the hash grid, then brute
                 // force over the whole cloud (cheaper than scanning far rings)
@@ -340,6 +343,27 @@ void ClothingManager::applyPadding(int index) {
         }
 }
 
+// Cheap fit update for interactive dragging (gizmo / fit sliders):
+// transforms raw vertices with the CURRENT fit matrix and clamps against the
+// stored (possibly stale) body-surface targets. Call refit() on release.
+void ClothingManager::applyFit(int index) {
+    if (index < 0 || index >= static_cast<int>(items_.size())) return;
+    ClothingItem& item = items_[index];
+    Mat4 m = item.fitMatrix();
+    for (size_t mi = 0; mi < item.model.meshes.size(); ++mi)
+        for (size_t pi = 0; pi < item.model.meshes[mi].prims.size(); ++pi) {
+            Primitive& prim = item.model.meshes[mi].prims[pi];
+            const ClothingItem::PrimFit& fit = item.fits[mi][pi];
+            for (size_t v = 0; v < prim.blendedPos.size(); ++v) {
+                Vec3 cp = m.transformPoint(prim.pos[v]);
+                Vec3 surfacePos = fit.targetPos[v] + fit.pushDir[v] * item.padding;
+                float sd = (cp - fit.targetPos[v]).dot(fit.pushDir[v]);
+                Vec3 base = sd < item.padding ? surfacePos : cp;
+                prim.blendedPos[v] = base * (1.f - item.shrink) + surfacePos * item.shrink;
+            }
+        }
+}
+
 void ClothingManager::refit(int index) {
     if (index < 0 || index >= static_cast<int>(items_.size())) return;
     ClothingItem& item = items_[index];
@@ -409,11 +433,12 @@ void ClothingManager::autoFitToBody(int index) {
 
     // scaling pivot: bbox center in X/Z, bbox bottom in Y — resizing keeps the
     // garment's position and hem instead of shifting it around the origin
+    const Mat4 fitM = item.fitMatrix();
     Vec3 pivot;
     {
         Vec3 pmn{1e30f, 1e30f, 1e30f}, pmx{-1e30f, -1e30f, -1e30f};
         for (const Vec3& s : samples) {
-            Vec3 w = s * item.fitScale + item.fitOffset;
+            Vec3 w = fitM.transformPoint(s);
             pmn.x = std::min(pmn.x, w.x); pmx.x = std::max(pmx.x, w.x);
             pmn.y = std::min(pmn.y, w.y); pmx.y = std::max(pmx.y, w.y);
             pmn.z = std::min(pmn.z, w.z); pmx.z = std::max(pmx.z, w.z);
@@ -429,7 +454,7 @@ void ClothingManager::autoFitToBody(int index) {
     auto metric = [&](float scale, const Vec3& off, double& outMean) {
         double sum = 0.0;
         for (const Vec3& s : samples) {
-            Vec3 w = s * item.fitScale + item.fitOffset;
+            Vec3 w = fitM.transformPoint(s);
             Vec3 ws = pivot + (w - pivot) * scale + off;
             float d = distToCloud(ws, *grid);
             sum += std::min(d, 0.25f);
@@ -442,7 +467,7 @@ void ClothingManager::autoFitToBody(int index) {
     // init: center X/Z only — garments are authored ground-aligned, keep authored Y
     Vec3 cmn{1e30f, 1e30f, 1e30f}, cmx{-1e30f, -1e30f, -1e30f};
     for (const Vec3& s : samples) {
-        Vec3 w = s * item.fitScale + item.fitOffset;
+        Vec3 w = fitM.transformPoint(s);
         cmn.x = std::min(cmn.x, w.x); cmx.x = std::max(cmx.x, w.x);
         cmn.z = std::min(cmn.z, w.z); cmx.z = std::max(cmx.z, w.z);
     }
@@ -482,8 +507,11 @@ void ClothingManager::autoFitToBody(int index) {
         }
         if (!improved) break;
     }
-    // w' = pivot + (w - pivot)*scale + off  <=>  newFit applied to raw verts
-    item.fitOffset = pivot * (1.f - scale) + item.fitOffset + off;
+    // w' = pivot + (w - pivot)*scale + off  <=>  uniform scale commutes, so:
+    //   newFitScale = fitScale * scale
+    //   newOffset   = pivot + (fitOffset - pivot) * scale + off
+    //   rotation unchanged
+    item.fitOffset = pivot + (item.fitOffset - pivot) * scale + off;
     item.fitScale *= scale;
 }
 
@@ -505,10 +533,30 @@ int ClothingManager::add(const std::string& path, std::string& err) {
     item.fitScale = autoUnitScale(item.model);
     item.unitScale = item.fitScale;
 
+    // raw bbox center (gizmo pivot)
+    {
+        Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+        for (const Mesh& m : item.model.meshes)
+            for (const Primitive& p : m.prims)
+                for (const Vec3& v : p.pos) {
+                    mn.x = std::min(mn.x, v.x); mn.y = std::min(mn.y, v.y);
+                    mn.z = std::min(mn.z, v.z);
+                    mx.x = std::max(mx.x, v.x); mx.y = std::max(mx.y, v.y);
+                    mx.z = std::max(mx.z, v.z);
+                }
+        item.rawCenter = (mn + mx) * 0.5f;
+    }
+
     items_.push_back(std::move(item));
     int idx = static_cast<int>(items_.size()) - 1;
     auto t1 = now();
     autoFitToBody(idx); // coarse alignment before weight transfer
+    // type anchor: if the file path reveals the garment type, snap it into place
+    // (Sketchfab exports are all "scene.gltf" — keywords live in the dir name)
+    {
+        std::string detected = detectType(items_[idx].path);
+        if (detected != "auto") applyType(idx, detected);
+    }
     auto t2 = now();
     refit(idx);
     auto t3 = now();
@@ -529,6 +577,127 @@ void ClothingManager::remove(int index) {
 
 void ClothingManager::clear() {
     items_.clear();
+}
+
+// ---- clothing types with anchor offsets ----
+
+namespace {
+const char* kBuiltinTypes = R"json({
+  "types": [
+    { "id": "auto",    "name": "Авто (как сшито)", "yOffset": 0.0,  "bottomAlign": false },
+    { "id": "panties", "name": "Трусы",            "yOffset": 0.92, "bottomAlign": false },
+    { "id": "shorts",  "name": "Шорты",            "yOffset": 0.8,  "bottomAlign": false },
+    { "id": "pants",   "name": "Штаны / брюки",    "yOffset": 0.52, "bottomAlign": false },
+    { "id": "skirt",   "name": "Юбка",             "yOffset": 0.8,  "bottomAlign": false },
+    { "id": "top",     "name": "Топ / футболка",   "yOffset": 1.22, "bottomAlign": false },
+    { "id": "bra",     "name": "Лиф / бюстгальтер","yOffset": 1.26, "bottomAlign": false },
+    { "id": "dress",   "name": "Платье",           "yOffset": 0.95, "bottomAlign": false },
+    { "id": "shoes",   "name": "Обувь",            "yOffset": 0.0,  "bottomAlign": true },
+    { "id": "head",    "name": "Голова / волосы",  "yOffset": 1.45, "bottomAlign": false }
+  ]
+})json";
+} // namespace
+
+void ClothingManager::loadTypes(const std::string& configPath) {
+    types_.clear();
+    nlohmann::json j;
+    {
+        std::ifstream f(configPath);
+        if (f) {
+            try { j = nlohmann::json::parse(f); }
+            catch (...) { j = nlohmann::json::object(); }
+        }
+    }
+    if (!j.contains("types")) j = nlohmann::json::parse(kBuiltinTypes);
+    for (const auto& t : j["types"]) {
+        ClothTypePreset p;
+        p.id = t.value("id", std::string{});
+        p.name = t.value("name", p.id);
+        p.yOffset = t.value("yOffset", 0.9f);
+        p.bottomAlign = t.value("bottomAlign", false);
+        if (!p.id.empty()) types_.push_back(std::move(p));
+    }
+}
+
+bool ClothingManager::saveTypes(const std::string& configPath) const {
+    try {
+        nlohmann::json j;
+        j["types"] = nlohmann::json::array();
+        for (const ClothTypePreset& p : types_) {
+            nlohmann::json t;
+            t["id"] = p.id;
+            t["name"] = p.name;
+            t["yOffset"] = p.yOffset;
+            t["bottomAlign"] = p.bottomAlign;
+            j["types"].push_back(std::move(t));
+        }
+        std::ofstream f(configPath);
+        if (!f) return false;
+        f << j.dump(2);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+const ClothTypePreset* ClothingManager::typePreset(const std::string& typeId) const {
+    for (const ClothTypePreset& p : types_)
+        if (p.id == typeId) return &p;
+    return nullptr;
+}
+
+std::string ClothingManager::detectType(const std::string& fileName) const {
+    std::string n = fileName;
+    std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return std::tolower(c); });
+    auto hasAny = [&](std::initializer_list<const char*> ks) {
+        for (const char* k : ks)
+            if (n.find(k) != std::string::npos) return true;
+        return false;
+    };
+    bool bottom = hasAny({"panties", "panty", "briefs", "underwear", "shorts", "pants",
+                          "trousers", "jeans", "leggings", "skirt"});
+    bool top = hasAny({"bra", "bikini", "lingerie", "hoodie", "sweater", "shirt", "top",
+                       "blouse", "jacket", "coat"});
+    if (bottom && top) return "auto"; // multi-garment set: keep authored placement
+    if (hasAny({"panties", "panty", "briefs", "underwear"})) return "panties";
+    if (hasAny({"shorts"})) return "shorts";
+    if (hasAny({"pants", "trousers", "jeans", "leggings"})) return "pants";
+    if (hasAny({"dress"})) return "dress";
+    if (hasAny({"skirt"})) return "skirt";
+    if (hasAny({"bra", "bikini", "lingerie"})) return "bra";
+    if (hasAny({"hoodie", "sweater", "shirt", "top", "blouse", "jacket", "coat"})) return "top";
+    if (hasAny({"shoes", "boots", "sneakers", "heels"})) return "shoes";
+    if (hasAny({"hair", "hat", "cap"})) return "head";
+    return "auto";
+}
+
+void ClothingManager::applyType(int index, const std::string& typeId) {
+    if (index < 0 || index >= static_cast<int>(items_.size())) return;
+    ClothingItem& item = items_[index];
+    item.type = typeId;
+    const ClothTypePreset* preset = typePreset(typeId);
+    if (!preset || typeId == "auto") return;
+
+    // garment bbox at the current fitScale+rotation (world = R*S*raw + fitOffset)
+    Mat4 rs = item.fitMatrixNoTrans();
+    Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+    for (const Mesh& m : item.model.meshes)
+        for (const Primitive& p : m.prims)
+            for (const Vec3& v : p.pos) {
+                Vec3 w = rs.transformPoint(v);
+                mn.x = std::min(mn.x, w.x); mx.x = std::max(mx.x, w.x);
+                mn.y = std::min(mn.y, w.y); mx.y = std::max(mx.y, w.y);
+                mn.z = std::min(mn.z, w.z); mx.z = std::max(mx.z, w.z);
+            }
+    if (mn.x > mx.x) return;
+
+    // center X/Z on the body axis, move to the anchor height
+    item.fitOffset.x = -(mn.x + mx.x) * 0.5f;
+    item.fitOffset.z = -(mn.z + mx.z) * 0.5f;
+    if (preset->bottomAlign)
+        item.fitOffset.y = preset->yOffset - mn.y;
+    else
+        item.fitOffset.y = preset->yOffset - (mn.y + mx.y) * 0.5f;
 }
 
 } // namespace ce

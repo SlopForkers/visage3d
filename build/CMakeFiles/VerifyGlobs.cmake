@@ -17,6 +17,7 @@ set(OLD_GLOB
   "D:/character_editor/src/render/ModelRenderer.cpp"
   "D:/character_editor/src/render/Shader.cpp"
   "D:/character_editor/src/ui/EditorUI.cpp"
+  "D:/character_editor/src/ui/Gizmo3D.cpp"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")
