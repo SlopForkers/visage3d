@@ -67,6 +67,9 @@ void ClothingManager::bakeNodeTransforms(Model& model) {
     for (const MeshInstance& inst : model.meshInstances) {
         const Mat4& w = world[inst.node];
         Mat3 nrm = w.upper3x3().inverted().transposed();
+        // mirrored transform (negative scale): flip the triangle winding or
+        // the mesh renders inside-out
+        const bool mirrored = w.upper3x3().det() < 0.f;
         for (Primitive& prim : model.meshes[inst.mesh].prims) {
             for (Vec3& p : prim.pos) p = w.transformPoint(p);
             for (Vec3& n : prim.normal) {
@@ -75,6 +78,9 @@ void ClothingManager::bakeNodeTransforms(Model& model) {
                        nrm.m[2] * n.x + nrm.m[5] * n.y + nrm.m[8] * n.z};
                 n = t.normalized();
             }
+            if (mirrored)
+                for (size_t t = 0; t + 2 < prim.indices.size(); t += 3)
+                    std::swap(prim.indices[t + 1], prim.indices[t + 2]);
         }
     }
 }
@@ -125,7 +131,84 @@ float percentile(std::vector<float>& v, float frac) {
     std::nth_element(v.begin(), v.begin() + k, v.end());
     return v[k];
 }
+
+// Single place where a fitted vertex is composed. The reference surface is
+// lerped between the real body surface (looseness=0, tight/anatomical) and
+// the drape envelope (looseness=1, concavities bridged like fabric). Then:
+// hard floor at ref+padding and optional shrink-wrap ("magnet") towards it.
+// At looseness=0 this is exactly the historical clamp+shrink behavior.
+Vec3 composeFitVert(const Vec3& base, const Vec3& target, const Vec3& dir,
+                    const Vec3& drapeTarget, const Vec3& drapeDir, float looseness,
+                    float padding, float shrink) {
+    Vec3 ref = target;
+    Vec3 rn = dir;
+    if (looseness > 0.f) {
+        ref = target + (drapeTarget - target) * looseness;
+        rn = (dir + (drapeDir - dir) * looseness).normalized();
+    }
+    Vec3 surf = ref + rn * padding;
+    float sd = (base - ref).dot(rn);
+    Vec3 c = sd < padding ? surf : base;
+    return c * (1.f - shrink) + surf * shrink;
+}
+
+// adjacency (CSR) from triangle indices
+void buildAdjacency(const std::vector<uint32_t>& indices, size_t nv,
+                    std::vector<uint32_t>& off, std::vector<uint32_t>& idx) {
+    std::vector<std::vector<uint32_t>> tmp(nv);
+    for (size_t t = 0; t + 2 < indices.size(); t += 3) {
+        uint32_t a = indices[t], b = indices[t + 1], c = indices[t + 2];
+        if (a >= nv || b >= nv || c >= nv) continue;
+        tmp[a].push_back(b); tmp[a].push_back(c);
+        tmp[b].push_back(a); tmp[b].push_back(c);
+        tmp[c].push_back(a); tmp[c].push_back(b);
+    }
+    off.assign(nv + 1, 0);
+    for (size_t v = 0; v < nv; ++v) {
+        std::sort(tmp[v].begin(), tmp[v].end());
+        tmp[v].erase(std::unique(tmp[v].begin(), tmp[v].end()), tmp[v].end());
+        off[v + 1] = off[v] + static_cast<uint32_t>(tmp[v].size());
+    }
+    idx.resize(off[nv]);
+    for (size_t v = 0; v < nv; ++v)
+        std::copy(tmp[v].begin(), tmp[v].end(), idx.begin() + off[v]);
+}
+
 } // namespace
+
+// Drape envelope: Laplacian smoothing of the body surface fills concavities
+// (cleavage, underbust fold). Convex regions would shrink — each point is
+// then pushed back along its original normal, but never BELOW the original
+// surface (concave points keep the fill). The result is a fabric-like
+// envelope that still contains the whole body (no skin poke-through).
+void ClothingManager::smoothCloud(std::vector<BodyPoint>& cloud,
+                                  const std::vector<uint32_t>& off,
+                                  const std::vector<uint32_t>& idx, int iters, float lambda) {
+    size_t nv = cloud.size();
+    if (nv == 0 || off.size() != nv + 1) return;
+    std::vector<Vec3> orig(nv), nrm(nv), cur(nv), next(nv);
+    for (size_t v = 0; v < nv; ++v) {
+        orig[v] = cloud[v].pos;
+        nrm[v] = cloud[v].nrm;
+        cur[v] = cloud[v].pos;
+    }
+    for (int it = 0; it < iters; ++it) {
+        for (size_t v = 0; v < nv; ++v) {
+            uint32_t b = off[v], e = off[v + 1];
+            if (b == e) { next[v] = cur[v]; continue; }
+            Vec3 avg{0, 0, 0};
+            for (uint32_t i = b; i < e; ++i) avg += cur[idx[i]];
+            avg = avg * (1.f / static_cast<float>(e - b));
+            next[v] = cur[v] + (avg - cur[v]) * lambda;
+        }
+        std::swap(cur, next);
+    }
+    for (size_t v = 0; v < nv; ++v) {
+        float back = (orig[v] - cur[v]).dot(nrm[v]);
+        if (back > 0.f) cur[v] = cur[v] + nrm[v] * back; // restore convex parts
+        cloud[v].pos = cur[v];
+    }
+}
 
 struct ClothingManager::CloudGrid {
     float cell = 0.05f;
@@ -193,6 +276,9 @@ const std::vector<ClothingManager::BodyPoint>& ClothingManager::bodyCloud() {
             for (const Primitive& prim : body_->meshes[inst.mesh].prims)
                 reserve += prim.pos.size();
     cloud_.reserve(reserve);
+    bodyAdjOff_.assign(1, 0);
+    bodyAdjIdx_.clear();
+    bodyAdjIdx_.reserve(reserve * 6);
 
     for (const MeshInstance& inst : body_->meshInstances) {
         if (inst.skin != bodySkinIndex_) continue;
@@ -209,6 +295,7 @@ const std::vector<ClothingManager::BodyPoint>& ClothingManager::bodyCloud() {
             const std::vector<Vec3>& nrm =
                 prim.blendedNormal.empty() ? prim.normal : prim.blendedNormal;
             const bool hasNrm = nrm.size() == pos.size();
+            const size_t cloudBase = cloud_.size();
             for (size_t v = 0; v < pos.size(); ++v) {
                 BodyPoint bp;
                 Mat4 skinM;
@@ -237,25 +324,43 @@ const std::vector<ClothingManager::BodyPoint>& ClothingManager::bodyCloud() {
                 bp.arm = dominant < static_cast<int>(armJoints_.size()) && armJoints_[dominant];
                 cloud_.push_back(bp);
             }
+            // per-prim adjacency, remapped into the global cloud indexing
+            std::vector<uint32_t> pOff, pIdx;
+            buildAdjacency(prim.indices, pos.size(), pOff, pIdx);
+            for (size_t v = 0; v < pos.size(); ++v)
+                bodyAdjOff_.push_back(bodyAdjOff_.back() + (pOff[v + 1] - pOff[v]));
+            for (uint32_t j : pIdx) bodyAdjIdx_.push_back(static_cast<uint32_t>(cloudBase) + j);
         }
     }
 
-    // spatial hash over the cloud
-    grid_ = std::make_unique<CloudGrid>();
-    const float cell = grid_->cell;
-    grid_->map.reserve(cloud_.size() * 2);
-    for (size_t i = 0; i < cloud_.size(); ++i) {
-        const Vec3& p = cloud_[i].pos;
-        grid_->map.insert({{static_cast<int>(std::floor(p.x / cell)),
+    auto buildGrid = [](const std::vector<BodyPoint>& cloud) {
+        auto g = std::make_unique<CloudGrid>();
+        const float cell = g->cell;
+        g->map.reserve(cloud.size() * 2);
+        for (size_t i = 0; i < cloud.size(); ++i) {
+            const Vec3& p = cloud[i].pos;
+            g->map.insert({{static_cast<int>(std::floor(p.x / cell)),
                             static_cast<int>(std::floor(p.y / cell)),
                             static_cast<int>(std::floor(p.z / cell))},
                            static_cast<int>(i)});
-    }
+        }
+        return g;
+    };
+
+    // spatial hash over the cloud
+    grid_ = buildGrid(cloud_);
+
+    // drape envelope (concavities filled, convex parts restored) + its grid
+    drapeCloud_ = cloud_;
+    smoothCloud(drapeCloud_, bodyAdjOff_, bodyAdjIdx_, 30, 0.6f);
+    drapeGrid_ = buildGrid(drapeCloud_);
     return cloud_;
 }
 
-int ClothingManager::knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq) const {
-    const CloudGrid& g = *grid_;
+int ClothingManager::knnCloud(const Vec3& p, int k, int* outIdx, float* outDistSq,
+                              const std::vector<BodyPoint>& cloud,
+                              const CloudGrid& grid) const {
+    const CloudGrid& g = grid;
     const float cell = g.cell;
     const int cx = static_cast<int>(std::floor(p.x / cell));
     const int cy = static_cast<int>(std::floor(p.y / cell));
@@ -265,7 +370,7 @@ int ClothingManager::knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq
     float worst = FLT_MAX; // largest distance^2 among the current top-k
 
     auto consider = [&](int i) {
-        Vec3 d = cloud_[i].pos - p;
+        Vec3 d = cloud[i].pos - p;
         float d2 = d.dot(d);
         if (found < k) {
             outIdx[found] = i;
@@ -305,7 +410,7 @@ int ClothingManager::knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq
     }
 
     // last resort: full scan (garment placed very far from the body)
-    for (size_t i = 0; i < cloud_.size(); ++i) consider(static_cast<int>(i));
+    for (size_t i = 0; i < cloud.size(); ++i) consider(static_cast<int>(i));
     return found;
 }
 
@@ -359,6 +464,8 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
             fit.basePos.resize(nv);
             fit.pushDir.resize(nv);
             fit.targetPos.resize(nv);
+            fit.drapePos.resize(nv);
+            fit.drapeDir.resize(nv);
 
             const Mat4 fitM = item.fitMatrix();
             const Quat fitR = item.fitRot;
@@ -418,15 +525,24 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
                 else if (v < prim.normal.size())
                     dir = fitR.rotate(prim.normal[v]);
 
+                // nearest point on the drape envelope (+ smoothed normal)
+                {
+                    int di[4];
+                    float dd[4];
+                    int dfound = knnCloud(cp, 4, di, dd, drapeCloud_, *drapeGrid_);
+                    int dn = 0;
+                    for (int q = 1; q < dfound; ++q)
+                        if (dd[q] < dd[dn]) dn = q;
+                    fit.drapePos[v] = drapeCloud_[di[dn]].pos;
+                    Vec3 dns{0, 0, 0};
+                    for (int q = 0; q < dfound; ++q)
+                        dns += drapeCloud_[di[q]].nrm * (1.f / (dd[q] + 1e-8f));
+                    fit.drapeDir[v] = dns.length() > 1e-6f ? dns.normalized() : dir;
+                }
+
                 fit.basePos[v] = cp;
                 fit.pushDir[v] = dir;
                 fit.targetPos[v] = target;
-                // never leave the vertex inside the body: clamp to surface + padding
-                // (signed distance along the body normal catches deep-inside verts too)
-                Vec3 surfacePos = target + dir * item.padding;
-                float sd = (cp - target).dot(dir);
-                Vec3 base = sd < item.padding ? surfacePos : cp;
-                prim.blendedPos[v] = base * (1.f - item.shrink) + surfacePos * item.shrink;
                 // normals follow the fit rotation (uniform scale keeps direction)
                 if (v < prim.normal.size())
                     prim.blendedNormal[v] = fitR.rotate(prim.normal[v]);
@@ -449,6 +565,12 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
                 }
                 for (auto& th : pool) th.join();
             }
+
+            for (size_t v = 0; v < nv; ++v)
+                prim.blendedPos[v] =
+                    composeFitVert(fit.basePos[v], fit.targetPos[v], fit.pushDir[v],
+                                   fit.drapePos[v], fit.drapeDir[v], item.looseness,
+                                   item.padding, item.shrink);
         }
     }
     return true;
@@ -464,18 +586,21 @@ void ClothingManager::applyPadding(int index) {
             Primitive& prim = item.model.meshes[mi].prims[pi];
             const ClothingItem::PrimFit& fit = item.fits[mi][pi];
             if (fit.targetPos.size() != prim.blendedPos.size()) continue;
-            for (size_t v = 0; v < prim.blendedPos.size(); ++v) {
-                Vec3 surfacePos = fit.targetPos[v] + fit.pushDir[v] * item.padding;
-                float sd = (fit.basePos[v] - fit.targetPos[v]).dot(fit.pushDir[v]);
-                Vec3 base = sd < item.padding ? surfacePos : fit.basePos[v];
-                prim.blendedPos[v] = base * (1.f - item.shrink) + surfacePos * item.shrink;
-            }
+            const bool hasDrape = fit.drapePos.size() == prim.blendedPos.size() &&
+                                  fit.drapeDir.size() == prim.blendedPos.size();
+            for (size_t v = 0; v < prim.blendedPos.size(); ++v)
+                prim.blendedPos[v] = composeFitVert(
+                    fit.basePos[v], fit.targetPos[v], fit.pushDir[v],
+                    hasDrape ? fit.drapePos[v] : fit.targetPos[v],
+                    hasDrape ? fit.drapeDir[v] : fit.pushDir[v],
+                    hasDrape ? item.looseness : 0.f, item.padding, item.shrink);
         }
 }
 
 // Cheap fit update for interactive dragging (gizmo / fit sliders):
 // transforms raw vertices with the CURRENT fit matrix and clamps against the
-// stored (possibly stale) body-surface targets. Call refit() on release.
+// stored (possibly stale) body-surface + envelope targets. Call refit() on
+// release to re-resolve them.
 void ClothingManager::applyFit(int index) {
     if (index < 0 || index >= static_cast<int>(items_.size())) return;
     ClothingItem& item = items_[index];
@@ -486,18 +611,17 @@ void ClothingManager::applyFit(int index) {
         for (size_t pi = 0; pi < item.model.meshes[mi].prims.size(); ++pi) {
             Primitive& prim = item.model.meshes[mi].prims[pi];
             const bool clamp = haveFits && pi < item.fits[mi].size() &&
-                               item.fits[mi][pi].targetPos.size() == prim.pos.size();
+                               item.fits[mi][pi].targetPos.size() == prim.pos.size() &&
+                               item.fits[mi][pi].drapePos.size() == prim.pos.size();
             const ClothingItem::PrimFit* fit = clamp ? &item.fits[mi][pi] : nullptr;
             if (prim.blendedNormal.size() != prim.pos.size()) prim.blendedNormal = prim.normal;
             for (size_t v = 0; v < prim.pos.size(); ++v) {
                 Vec3 cp = m.transformPoint(prim.pos[v]);
                 Vec3 out = cp;
-                if (fit) {
-                    Vec3 surfacePos = fit->targetPos[v] + fit->pushDir[v] * item.padding;
-                    float sd = (cp - fit->targetPos[v]).dot(fit->pushDir[v]);
-                    Vec3 base = sd < item.padding ? surfacePos : cp;
-                    out = base * (1.f - item.shrink) + surfacePos * item.shrink;
-                }
+                if (fit)
+                    out = composeFitVert(cp, fit->targetPos[v], fit->pushDir[v],
+                                         fit->drapePos[v], fit->drapeDir[v], item.looseness,
+                                         item.padding, item.shrink);
                 prim.blendedPos[v] = out;
                 if (v < prim.normal.size())
                     prim.blendedNormal[v] = r.rotate(prim.normal[v]);
@@ -681,7 +805,8 @@ std::string ClothingManager::detectType(const std::string& fileName) {
     bool bottom = hasAny({"panties", "panty", "briefs", "underwear", "shorts", "pants",
                           "trousers", "jeans", "leggings", "skirt"});
     bool top = hasAny({"bra", "bikini", "lingerie", "hoodie", "sweater", "shirt", "top",
-                       "blouse", "jacket", "coat"});
+                       "blouse", "jacket", "coat", "tshirt", "t-shirt", "t_shirt",
+                       "footbolka", "futbolka", "polo"});
     if (bottom && top) return "auto"; // multi-garment set: keep authored placement
     if (hasAny({"panties", "panty", "briefs", "underwear"})) return "panties";
     if (hasAny({"shorts"})) return "shorts";
@@ -689,7 +814,9 @@ std::string ClothingManager::detectType(const std::string& fileName) {
     if (hasAny({"dress"})) return "dress";
     if (hasAny({"skirt"})) return "skirt";
     if (hasAny({"bra", "bikini", "lingerie"})) return "bra";
-    if (hasAny({"hoodie", "sweater", "shirt", "top", "blouse", "jacket", "coat"})) return "top";
+    if (hasAny({"hoodie", "sweater", "shirt", "top", "blouse", "jacket", "coat",
+                "tshirt", "t-shirt", "t_shirt", "footbolka", "futbolka", "polo"}))
+        return "top";
     if (hasAny({"shoes", "boots", "sneakers", "heels"})) return "shoes";
     if (hasAny({"hair", "hat", "cap"})) return "head";
     if (hasAny({"necklace", "earring", "glasses", "sunglass", "watch", "bracelet", "jewel",
@@ -754,7 +881,13 @@ void ClothingManager::applyType(int index, const std::string& typeId, bool scale
         if (preset->bottomAlign) {
             y0 = preset->yOffset;
             y1 = preset->yOffset + std::max(0.12f, 0.5f * h);
+        } else if (typeId == "top" || typeId == "bra" || typeId == "dress") {
+            // chest band (cups), not the straps at the top of the bbox
+            float c = off.y + (mn.y + mx.y) * 0.5f;
+            y0 = c - 0.15f * h;
+            y1 = c + 0.15f * h;
         } else {
+            // waistband area (top of the garment)
             y1 = off.y + mx.y;
             y0 = y1 - 0.3f * h;
         }

@@ -30,7 +30,9 @@ struct ClothingItem {
         return Mat4::rotation(fitRot) * Mat4::scaling({fitScale, fitScale, fitScale});
     }
     float padding = 0.004f; // surface offset (m) against body poke-through
-    float shrink = 0.f;     // 0..1 shrink-wrap towards the body surface
+    float shrink = 0.f;     // 0..1 shrink-wrap ("magnet") towards the body surface
+    float looseness = 0.f;  // 0..1 drape: smooths the fit, bridges concavities
+                            // (cleavage!) instead of painting the body shape
     bool visible = true;
     std::string type = "auto"; // clothing type id ("auto" = keep authored position)
     std::string slot;          // equipment slot id ("" = free, not slot-bound)
@@ -44,6 +46,9 @@ struct ClothingItem {
         std::vector<Vec3> basePos;   // fitted, before padding/shrink
         std::vector<Vec3> pushDir;   // away-from-body direction
         std::vector<Vec3> targetPos; // nearest body surface point
+        std::vector<Vec3> drapePos;  // nearest point on the DRAPE ENVELOPE
+                                     // (smoothed body: concavities filled)
+        std::vector<Vec3> drapeDir;  // envelope normal
     };
     std::vector<std::vector<PrimFit>> fits; // [mesh][prim]
 };
@@ -154,14 +159,25 @@ private:
     struct CloudGrid;
     std::vector<BodyPoint> cloud_;       // cached, shared by all items
     std::unique_ptr<CloudGrid> grid_;    // spatial hash over cloud_
+    std::vector<BodyPoint> drapeCloud_;  // smoothed copy of cloud_ (drape envelope:
+                                         // concavities filled, convex parts restored)
+    std::unique_ptr<CloudGrid> drapeGrid_;
+    std::vector<uint32_t> bodyAdjOff_, bodyAdjIdx_; // cloud vertex adjacency (CSR)
     std::vector<bool> armJoints_;        // per body-skin joint: under an arm bone
     bool cloudDirty_ = true;
 
-    const std::vector<BodyPoint>& bodyCloud(); // builds cloud_+grid_ when dirty
+    const std::vector<BodyPoint>& bodyCloud(); // builds cloud_+grids when dirty
     void buildArmJointFlags();
-    // Exact K nearest body points (expanding grid rings + safe early-out,
-    // brute force only as a last resort). Returns count found (<= k).
-    int knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq) const;
+    // drape envelope: smoothing + convex restoration of the body cloud
+    static void smoothCloud(std::vector<BodyPoint>& cloud, const std::vector<uint32_t>& off,
+                            const std::vector<uint32_t>& idx, int iters, float lambda);
+    // Exact K nearest points of a cloud (expanding grid rings + safe
+    // early-out, brute force only as a last resort). Returns count (<= k).
+    int knnCloud(const Vec3& p, int k, int* outIdx, float* outDistSq,
+                 const std::vector<BodyPoint>& cloud, const CloudGrid& grid) const;
+    int knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq) const {
+        return knnCloud(p, k, outIdx, outDistSq, cloud_, *grid_);
+    }
     // Body width (m) at a height band, arm points excluded; 0 when unknown.
     float bodyWidthInBand(float y0, float y1) const;
     // Body center (x,z) of the cloud; falls back to origin when empty.
