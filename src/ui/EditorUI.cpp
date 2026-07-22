@@ -33,32 +33,25 @@ void EditorUI::draw(int winW, int winH, float fps) {
                             model->nodes.size());
     }
 
-    // ---- tabs ----
+    // ---- tabs (header + tab bar pinned, tab content scrolls) ----
+    const float footerH = ImGui::GetFrameHeightWithSpacing() * 3.2f; // FPS + status
     if (ImGui::BeginTabBar("##maintabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
-        if (ImGui::BeginTabItem("Тело")) {
-            drawBodyTab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Лицо")) {
-            drawFaceTab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Причёска")) {
-            drawHairTab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Одежда")) {
-            drawClothingTab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Пресеты")) {
-            drawPresetsTab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Вид")) {
-            drawViewTab();
-            ImGui::EndTabItem();
-        }
+        auto tab = [&](const char* label, void (EditorUI::*fn)()) {
+            if (ImGui::BeginTabItem(label)) {
+                float h = ImGui::GetContentRegionAvail().y - footerH;
+                ImGui::BeginChild("##tabscroll", ImVec2(0, std::max(h, 60.f)), false,
+                                  ImGuiWindowFlags_None);
+                (this->*fn)();
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+            }
+        };
+        tab("Тело", &EditorUI::drawBodyTab);
+        tab("Лицо", &EditorUI::drawFaceTab);
+        tab("Причёска", &EditorUI::drawHairTab);
+        tab("Одежда", &EditorUI::drawClothingTab);
+        tab("Пресеты", &EditorUI::drawPresetsTab);
+        tab("Вид", &EditorUI::drawViewTab);
         ImGui::EndTabBar();
     }
 
@@ -106,21 +99,36 @@ void EditorUI::drawBodyTab() {
     if (!controller) return;
     if (ImGui::Button("Сбросить всё", ImVec2(-1, 0))) controller->resetAll();
     ImGui::Spacing();
-    for (ShapeParam& p : controller->params())
-        if (p.group == "Тело" || p.group == "Body") drawParamSlider(p);
+
+    // bone-scale params in collapsible sections by group (Фигура / Рост / Мышцы)
+    std::vector<std::string> order;
+    std::map<std::string, std::vector<ShapeParam*>> groups;
+    for (ShapeParam& p : controller->params()) {
+        if (p.type != ShapeParam::Type::BoneScale) continue;
+        if (p.group == "Лицо" || p.group == "Face") continue;
+        if (groups.find(p.group) == groups.end()) order.push_back(p.group);
+        groups[p.group].push_back(&p);
+    }
+    bool first = true;
+    for (const std::string& g : order) {
+        if (ImGui::TreeNodeEx(g.c_str(), first ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+            for (ShapeParam* p : groups[g]) drawParamSlider(*p);
+            ImGui::TreePop();
+        }
+        first = false;
+    }
 
     // ---- vertex effectors: nipples / areolas ----
     bool hasNip = false;
     for (ShapeParam& p : controller->params())
         if (p.type == ShapeParam::Type::VertexEffect) { hasNip = true; break; }
-    if (hasNip) {
-        ImGui::Separator();
-        ImGui::TextDisabled("Соски");
+    if (hasNip && ImGui::TreeNode("Соски")) {
         for (ShapeParam& p : controller->params())
             if (p.type == ShapeParam::Type::VertexEffect) drawParamSlider(p);
         ImGui::ColorEdit3("Цвет ореолы", areolaColor);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Оттенок области ореолы (работает при «Затемнение» > 0)");
+        ImGui::TreePop();
     }
 }
 

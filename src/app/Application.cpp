@@ -7,14 +7,54 @@
 #include "imgui_impl_opengl3.h"
 #include "stb_image_write.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <vector>
 
 namespace ce {
 
 namespace {
+
+// Resolve the data root (the dir containing config/body_params.json). When
+// the exe is launched by double-click, the working dir is the exe dir
+// (build/) and relative paths (config/, presets/, models/) silently miss —
+// walk up from the exe location and switch the cwd so they always work.
+void ensureDataRoot() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<fs::path> starts;
+    wchar_t exePath[MAX_PATH] = {};
+    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH))
+        starts.push_back(fs::path(exePath).parent_path());
+    fs::path cwd = fs::current_path(ec);
+    if (!ec) starts.push_back(cwd);
+
+    for (const fs::path& start : starts) {
+        fs::path dir = start;
+        for (int up = 0; up < 5; ++up) {
+            if (fs::exists(dir / "config" / "body_params.json", ec) && !ec) {
+                fs::current_path(dir, ec);
+                if (!ec && dir != cwd)
+                    std::fprintf(stderr, "Data root: %s\n", dir.string().c_str());
+                return;
+            }
+            fs::path parent = dir.parent_path();
+            if (parent == dir) break;
+            dir = parent;
+        }
+    }
+}
+
 
 std::string& droppedFile() {
     static std::string f;
@@ -37,6 +77,8 @@ void scrollCallback(GLFWwindow*, double, double yoff) {
 } // namespace
 
 bool Application::init(int argc, char** argv) {
+    ensureDataRoot(); // cwd must point at the repo root (config/, presets/, models/)
+
     // ---- parse CLI ----
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];

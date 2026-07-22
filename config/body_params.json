@@ -2,31 +2,31 @@
   "comment": "Правила авто-определения параметров. bones — точные имена костей, patterns — regex для других моделей. axes — показатель степени масштаба по осям XYZ. compensate — компенсировать масштаб на дочерних костях. entries — несколько правил на параметр; translate — смещение кости: mode=value (axis*factor*(value-def)) или mode=scale (axis*factor*(s-1)).",
   "boneParams": [
     {
-      "id": "breast_size", "name": "Размер груди", "group": "Тело",
+      "id": "breast_size", "name": "Размер груди", "group": "Фигура",
       "bones": ["J_Sec_L_Bust1", "J_Sec_R_Bust1"],
       "patterns": ["(?i)(bust|breast)_?[lr]?_?1$", "(?i)^mune_[lr]$"],
       "min": 0.5, "max": 1.8, "axes": [1.0, 1.0, 1.0], "compensate": false
     },
     {
-      "id": "buttocks_size", "name": "Размер ягодиц", "group": "Тело",
+      "id": "buttocks_size", "name": "Размер ягодиц", "group": "Фигура",
       "bones": ["J_Bip_C_Hips"],
       "patterns": ["(?i)(hips|pelvis)$"],
       "min": 0.6, "max": 1.6, "axes": [0.6, 0.35, 1.0], "compensate": true
     },
     {
-      "id": "hip_width", "name": "Ширина бёдер", "group": "Тело",
+      "id": "hip_width", "name": "Ширина бёдер", "group": "Фигура",
       "bones": ["J_Bip_C_Hips"],
       "patterns": ["(?i)(hips|pelvis)$"],
       "min": 0.8, "max": 1.4, "axes": [1.0, 0.1, 0.25], "compensate": true
     },
     {
-      "id": "waist_size", "name": "Талия", "group": "Тело",
+      "id": "waist_size", "name": "Талия", "group": "Фигура",
       "bones": ["J_Bip_C_Spine"],
       "patterns": ["(?i)spine_?1?$", "(?i)^(spine|waist)$"],
       "min": 0.75, "max": 1.35, "axes": [1.0, 0.0, 1.0], "compensate": true
     },
     {
-      "id": "weight", "name": "Вес", "group": "Тело",
+      "id": "weight", "name": "Вес", "group": "Фигура",
       "min": 0.85, "max": 1.2,
       "entries": [
         { "bones": ["J_Bip_C_Hips"],  "patterns": ["(?i)(hips|pelvis)$"],   "axes": [1.0, 0.4, 1.0], "compensate": true },
@@ -37,14 +37,14 @@
       ]
     },
     {
-      "id": "belly_abs", "name": "Пресс (живот)", "group": "Тело",
+      "id": "belly_abs", "name": "Пресс (живот)", "group": "Фигура",
       "min": 0.85, "max": 1.15,
       "entries": [
         { "bones": ["J_Bip_C_Spine"], "patterns": ["(?i)spine_?1?$"], "axes": [0.3, 0.0, 1.0], "compensate": true }
       ]
     },
     {
-      "id": "height", "name": "Рост", "group": "Тело",
+      "id": "height", "name": "Рост", "group": "Рост",
       "min": 0.92, "max": 1.08,
       "entries": [
         { "bones": ["J_Bip_L_UpperLeg", "J_Bip_R_UpperLeg"], "patterns": ["(?i)upper_?leg$", "(?i)thigh"], "axes": [0.0, 1.0, 0.0], "compensate": false },
@@ -53,7 +53,7 @@
       ]
     },
     {
-      "id": "leg_length", "name": "Длина ног", "group": "Тело",
+      "id": "leg_length", "name": "Длина ног", "group": "Рост",
       "min": 0.9, "max": 1.12,
       "entries": [
         { "bones": ["J_Bip_L_UpperLeg", "J_Bip_R_UpperLeg"], "patterns": ["(?i)upper_?leg$", "(?i)thigh"], "axes": [0.0, 1.0, 0.0], "compensate": false },
@@ -61,10 +61,53 @@
       ]
     },
     {
-      "id": "arm_length", "name": "Длина рук", "group": "Тело",
+      "id": "arm_length", "name": "Длина рук", "group": "Рост",
       "min": 0.9, "max": 1.15,
       "entries": [
         { "bones": ["J_Bip_L_UpperArm", "J_Bip_R_UpperArm"], "patterns": ["(?i)upper_?arm$"], "axes": [1.0, 0.0, 0.0], "compensate": false }
+      ]
+    },
+    {
+      "id": "torso_length", "name": "Длина торса", "group": "Рост",
+      "min": 0.9, "max": 1.12,
+      "entries": [
+        { "bones": ["J_Bip_C_Spine"], "patterns": ["(?i)spine_?1?$"], "axes": [0.0, 1.0, 0.0], "compensate": true },
+        { "bones": ["J_Bip_C_Chest"], "patterns": ["(?i)(^|[_ ])chest$"], "axes": [0.0, 1.0, 0.0], "compensate": true }
+      ]
+    },
+    {
+      "id": "muscle_arms", "name": "Мышцы рук", "group": "Мышцы",
+      "min": 1.0, "max": 1.35,
+      "entries": [
+        { "bones": ["J_Bip_L_UpperArm", "J_Bip_L_LowerArm", "J_Bip_R_UpperArm", "J_Bip_R_LowerArm"],
+          "patterns": ["(?i)(upper|lower)_?arm$", "(?i)fore ?arm$"],
+          "axes": [0.0, 1.0, 1.0], "compensate": true }
+      ]
+    },
+    {
+      "id": "muscle_legs", "name": "Мышцы ног", "group": "Мышцы",
+      "min": 1.0, "max": 1.3,
+      "entries": [
+        { "bones": ["J_Bip_L_UpperLeg", "J_Bip_L_LowerLeg", "J_Bip_R_UpperLeg", "J_Bip_R_LowerLeg"],
+          "patterns": ["(?i)(upper|lower)_?leg$", "(?i)thigh$", "(?i)(calf|shin)$"],
+          "axes": [1.0, 0.0, 1.0], "compensate": true }
+      ]
+    },
+    {
+      "id": "muscle_shoulders", "name": "Плечи (дельты)", "group": "Мышцы",
+      "min": 1.0, "max": 1.2,
+      "entries": [
+        { "bones": ["J_Bip_L_Shoulder", "J_Bip_R_Shoulder"],
+          "patterns": ["(?i)shoulder$", "(?i)clavicle$"],
+          "axes": [0.2, 0.8, 0.8], "compensate": false }
+      ]
+    },
+    {
+      "id": "muscle_chest", "name": "Грудные мышцы", "group": "Мышцы",
+      "min": 1.0, "max": 1.2,
+      "entries": [
+        { "bones": ["J_Bip_C_Chest"], "patterns": ["(?i)(^|[_ ])chest$"],
+          "axes": [1.0, 0.2, 1.0], "compensate": true }
       ]
     },
     {

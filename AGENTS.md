@@ -12,7 +12,9 @@ cmake --build build -j
 .\build\character_editor.exe --frames 30 --screenshot shot.png   # пакетный режим
 ```
 
-Запускать нужно из корня репозитория: пути `female_base.vrm`, `config/`, `presets/` относительные.
+Пути `female_base.vrm`, `config/`, `presets/`, `models/` относительные, но при старте
+`ensureDataRoot()` ищет `config/body_params.json`, поднимаясь от пути exe (и от cwd) вверх
+до 5 уровней, и переключает туда cwd — двойной клик по exe тоже находит конфиги/пресеты/models.
 
 CLI: `[model] [--model p] [--preset name] [--screenshot out.png] [--frames N] [--size WxH]`
 `[--set id=value]... [--yaw deg] [--dist m] [--targety m] [--clothe path]... [--listparams]`.
@@ -35,8 +37,8 @@ CLI: `[model] [--model p] [--preset name] [--screenshot out.png] [--frames N] [-
   `glCullFace(GL_FRONT)` до основных проходов). Управление — вкладка «Вид» («Тун-шейдинг»,
   «Контур», толщина px), флаги в `ModelRenderer`: `toonShading`, `outlineEnabled`, `outlineWidth`,
   `outlineColor`.
-- `src/ui/` — `EditorUI` (левая панель 340px, вкладки сверху как в VRoid: **Тело | Лицо | Причёска | Одежда | Пресеты | Вид**, русский UI, кириллица из segoeui/arial).
-- `src/app/` — `Application` (окно GLFW, цикл, drag&drop, скриншоты, debounced авто-подгонка), `FileDialog` (Win32 GetOpenFileNameW).
+- `src/ui/` — `EditorUI` (левая панель 340px, вкладки сверху как в VRoid: **Тело | Лицо | Причёска | Одежда | Пресеты | Вид**, контент вкладок — прокручиваемый child-регион, шапка/подвал закреплены; русский UI, кириллица из segoeui/arial).
+- `src/app/` — `Application` (окно GLFW, цикл, drag&drop, скриншоты, инвалидация облака одежды), `FileDialog` (Win32 GetOpenFileNameW).
 
 ## Параметры тела и лица
 
@@ -47,11 +49,18 @@ CLI: `[model] [--model p] [--preset name] [--screenshot out.png] [--frames N] [-
 - `entries`: несколько правил на параметр, у каждого свои axes; `translate` — смещение кости
   (`mode: value` → `axis*factor*(v-def)`, `mode: scale` → `axis*factor*(s-1)`).
 
-Тело: `breast_size`, `buttocks_size`, `hip_width`, `waist_size`, `weight` (hips+spine+chest+бедра+плечи),
-`belly_abs`, `height` (ноги+спина по Y + подъём hips на `0.78*(s-1)`, чтобы ступни оставались на полу),
-`leg_length`, `arm_length`. Лицо: `head_size`, `eye_size`, `eye_spacing`, `eye_height`
+Вкладка «Тело» рисует bone-параметры сворачиваемыми секциями по `p.group`: «Фигура»
+(`breast_size`, `buttocks_size`, `hip_width`, `waist_size`, `weight` (hips+spine+chest+бедра+плечи),
+`belly_abs`), «Рост» (`height` — ноги+спина по Y + подъём hips на `0.78*(s-1)`, чтобы ступни
+оставались на полу, `leg_length`, `arm_length`, `torso_length` — spine+chest по Y, compensate,
+ступни и так на месте, подъём не нужен), «Мышцы»: `muscle_arms`
+(плечо+предплечье по Y/Z, кисти компенсированы), `muscle_legs` (бедро+голень по X/Z, ступни
+компенсированы), `muscle_shoulders` (дельты, без compensate — рука наследует масштаб по цепочке),
+`muscle_chest` (грудная клетка по X/Z, compensate — bust/шея/плечи не меняют размер, только
+позиции). Лицо: `head_size`, `eye_size`, `eye_spacing`, `eye_height`
 (последние два — translate по `J_Adj_*_FaceEye`). Компенсация (`compensate:true`) — дочерним костям
-обратный масштаб (ягодицы не растягивают торс).
+обратный масштаб (ягодицы не растягивают торс); потомки, сами являющиеся целями того же правила,
+не компенсируются (поэтому бедро+голень можно держать в одном правиле).
 
 **Вершинные эффекторы (редактор сосков)** — `ShapeParam::Type::VertexEffect`, секции
 `effectorAnchors`/`effectorParams` в `body_params.json`. Якорь = bust-кость (`J_Sec_*_Bust1`);
