@@ -10,6 +10,7 @@
     { "id": "bra",     "name": "Лиф / бюстгальтер", "yOffset": 1.26, "bottomAlign": false },
     { "id": "dress",   "name": "Платье",           "yOffset": 0.95, "bottomAlign": false },
     { "id": "shoes",   "name": "Обувь",            "yOffset": 0.0,  "bottomAlign": true },
-    { "id": "head",    "name": "Голова / волосы",  "yOffset": 1.45, "bottomAlign": false }
+    { "id": "head",    "name": "Голова / волосы",  "yOffset": 1.45, "bottomAlign": false },
+    { "id": "accessory", "name": "Аксессуар",      "yOffset": 0.0,  "bottomAlign": false }
   ]
 }

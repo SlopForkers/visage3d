@@ -1,6 +1,7 @@
 #pragma once
 #include "model/Model.h"
 #include "model/Skeleton.h"
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,7 +33,9 @@ struct ClothingItem {
     float shrink = 0.f;     // 0..1 shrink-wrap towards the body surface
     bool visible = true;
     std::string type = "auto"; // clothing type id ("auto" = keep authored position)
+    std::string slot;          // equipment slot id ("" = free, not slot-bound)
     Vec3 rawCenter{0, 0, 0};   // bbox center in raw space (gizmo pivot)
+    Vec3 rawMin{0, 0, 0}, rawMax{0, 0, 0}; // raw-space bbox (for size-to-body)
 
     bool weightsReady = false; // false until transferWeights succeeded
 
@@ -57,17 +60,27 @@ struct ClothTypePreset {
 
 // Owns clothing items and the auto-fitting pipeline:
 //  1) unit auto-detection (mm/cm/dm/m) from bounding box magnitude
-//  2) weight transfer from nearest body surface points (spatial hash grid)
-//  3) padding along the away-from-body direction
+//  2) deterministic placement: type anchor (height on the body) + size-to-body
+//     width match (no iterative search — see applyType)
+//  3) weight transfer from nearest body surface points (spatial hash grid)
+//  4) padding along the away-from-body direction
 // Body-shape parameters deform clothing automatically afterwards, because
 // clothing vertices are skinned by the same skeleton.
+//
+// The body point cloud + its lookup grid are cached and shared by all items;
+// call invalidateBody() when the body shape/pose changes.
 class ClothingManager {
 public:
+    ClothingManager();
+    ~ClothingManager(); // out-of-line: CloudGrid is incomplete here (pimpl)
+
     void bind(Model& body, Skeleton& skeleton);
 
-    // Loads a clothing model, auto-detects its unit scale, transfers weights.
+    // Loads a clothing model, auto-detects its unit scale, places it by type
+    // and transfers weights. deferFit=true skips placement+transfer (the
+    // caller sets stored fit params and calls refit() itself — preset load).
     // Returns item index or -1 on error (err filled).
-    int add(const std::string& path, std::string& err);
+    int add(const std::string& path, std::string& err, bool deferFit = false);
     void remove(int index);
     void clear();
 
@@ -79,23 +92,41 @@ public:
     // clamps against stored (stale) targets. Call refit() on release.
     void applyFit(int index);
 
-    // Coordinate-descent fit: searches scale + offset minimizing the mean
-    // distance from clothing vertices to the body surface.
-    void autoFitToBody(int index);
-
     // ---- clothing types with anchor offsets ----
-    // Applies the type's anchor: centers the garment X/Z and moves it to the
-    // type's target height. "auto" keeps the current fit. Call refit() after.
-    void applyType(int index, const std::string& typeId);
-    std::string detectType(const std::string& fileName) const;
+    // Applies the type's anchor: centers the garment X/Z on the body axis and
+    // moves it to the type's target height. With scaleToBody=true (new
+    // placement, "Подогнать под тело") the garment is also uniformly scaled so
+    // its width matches the body width measured at the garment's top band.
+    // "auto"/"accessory" keep the authored placement. Call refit() after.
+    void applyType(int index, const std::string& typeId, bool scaleToBody = false);
+
+    static std::string detectType(const std::string& fileName);
+    // Equipment slot for a clothing type ("" = not slot-bound, coexists freely).
+    static std::string slotForType(const std::string& typeId);
+
+    struct SlotDef {
+        std::string id;   // "top"
+        std::string name; // "Верх"
+    };
+    const std::vector<SlotDef>& slots() const { return slots_; }
+    int itemInSlot(const std::string& slotId) const; // item index or -1
+
     const std::vector<ClothTypePreset>& types() const { return types_; }
     std::vector<ClothTypePreset>& types() { return types_; }
     const ClothTypePreset* typePreset(const std::string& typeId) const;
     void loadTypes(const std::string& configPath); // missing file -> builtins
     bool saveTypes(const std::string& configPath) const;
 
+    // The body shape/pose changed: rebuild the shared point cloud on next use.
+    void invalidateBody() { cloudDirty_ = true; }
+
     std::vector<ClothingItem>& items() { return items_; }
     const std::vector<ClothingItem>& items() const { return items_; }
+
+    // Fired after add/remove/clear: the items vector may have reallocated or
+    // shifted, so outside observers holding pointers INTO items (e.g. the
+    // renderer's per-slot Model*) must re-resolve them.
+    std::function<void()> onItemsChanged;
 
     // skin index of the body mesh (clothing joints index into this skin)
     int bodySkinIndex() const { return bodySkinIndex_; }
@@ -105,6 +136,7 @@ private:
     Skeleton* skeleton_ = nullptr;
     std::vector<ClothingItem> items_;
     std::vector<ClothTypePreset> types_;
+    std::vector<SlotDef> slots_;
     int bodySkinIndex_ = -1;
 
     void bakeNodeTransforms(Model& model);
@@ -114,15 +146,26 @@ private:
     // body surface point cloud for nearest queries (world space, current pose)
     struct BodyPoint {
         Vec3 pos;
-        Vec3 nrm; // skinned surface normal (true outward direction)
+        Vec3 nrm;   // skinned surface normal (true outward direction)
         uint16_t joints[4];
         float weights[4];
+        bool arm;   // dominant joint belongs to an arm (excluded from width match)
     };
-    std::vector<BodyPoint> buildBodyPointCloud();
-
     struct CloudGrid;
-    std::unique_ptr<CloudGrid> makeGrid(const std::vector<BodyPoint>& cloud, float cell);
-    float distToCloud(const Vec3& p, const CloudGrid& grid) const;
+    std::vector<BodyPoint> cloud_;       // cached, shared by all items
+    std::unique_ptr<CloudGrid> grid_;    // spatial hash over cloud_
+    std::vector<bool> armJoints_;        // per body-skin joint: under an arm bone
+    bool cloudDirty_ = true;
+
+    const std::vector<BodyPoint>& bodyCloud(); // builds cloud_+grid_ when dirty
+    void buildArmJointFlags();
+    // Exact K nearest body points (expanding grid rings + safe early-out,
+    // brute force only as a last resort). Returns count found (<= k).
+    int knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq) const;
+    // Body width (m) at a height band, arm points excluded; 0 when unknown.
+    float bodyWidthInBand(float y0, float y1) const;
+    // Body center (x,z) of the cloud; falls back to origin when empty.
+    void bodyAxisCenter(float& cx, float& cz) const;
 };
 
 } // namespace ce

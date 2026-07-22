@@ -165,6 +165,12 @@ bool Gizmo3D::frame(int winW, int winH, const Camera& cam, Vec3 origin, bool& ch
     ImVec2 o;
     bool projOk = project(vp, winW, winH, origin_, o);
 
+    // snapshot: "changed" means modified since the PREVIOUS FRAME (holding the
+    // mouse still mid-drag must not trigger expensive re-uploads)
+    Vec3 prevOffset = offset;
+    Quat prevRot = rot;
+    float prevScale = scale;
+
     if (mode == Translate && projOk) {
         ImVec2 mdelta = mouse - startMouse_;
         auto axisDelta = [&](int a) {
@@ -185,8 +191,6 @@ bool Gizmo3D::frame(int winW, int winH, const Camera& cam, Vec3 origin, bool& ch
             (&delta.x)[pairs[pl][1]] = axisDelta(pairs[pl][1]);
         }
         offset = startOffset_ + delta;
-        changed = (offset.x != startOffset_.x) || (offset.y != startOffset_.y) ||
-                  (offset.z != startOffset_.z);
     } else if (mode == Rotate && projOk && active_ >= AxisX && active_ <= AxisZ) {
         float a0 = std::atan2(startMouse_.y - o.y, startMouse_.x - o.x);
         float a1 = std::atan2(mouse.y - o.y, mouse.x - o.x);
@@ -196,13 +200,14 @@ bool Gizmo3D::frame(int winW, int winH, const Camera& cam, Vec3 origin, bool& ch
         float f = AXES[active_].dot(toCam);
         delta *= (f > 0.f ? -1.f : 1.f);
         rot = (Quat::axisAngle(AXES[active_], delta) * startRot_).normalized();
-        changed = true;
     } else if (mode == Scale && projOk) {
         float r0 = std::max(len2d(startMouse_ - o), 4.f);
         float r1 = len2d(mouse - o);
         scale = std::clamp(startScale_ * (r1 / r0), 0.01f, 100.f);
-        changed = std::fabs(scale - startScale_) > 1e-6f;
     }
+    changed = (offset.x != prevOffset.x) || (offset.y != prevOffset.y) ||
+              (offset.z != prevOffset.z) || (rot.x != prevRot.x) || (rot.y != prevRot.y) ||
+              (rot.z != prevRot.z) || (rot.w != prevRot.w) || (scale != prevScale);
     return true;
 }
 

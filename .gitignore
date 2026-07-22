@@ -1,1 +1,17 @@
+# Build artifacts
+build/
+*.exe
+*.obj
+*.o
+*.a
+*.pdb
+
+# ImGui window layout (per-user)
+imgui.ini
+
+# Editor output
+screenshot.png
+shot.png
+
+# Large binary assets (kept locally)
 female_base.vrm

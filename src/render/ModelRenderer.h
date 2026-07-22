@@ -28,6 +28,8 @@ public:
     int addModel(Model& model, int forceSkin = -1);
     void removeModel(int slot);
     void setVisible(int slot, bool visible);
+    // Re-points a slot at its model (the owner reallocated/moved it).
+    void setModel(int slot, Model* model);
     void releaseAll(); // frees GPU resources of all slots
 
     // Re-blends morphs (if any) and re-uploads vertex data of a slot.
@@ -67,6 +69,7 @@ private:
     unsigned gridVao_ = 0, gridVbo_ = 0;
     int gridVertexCount_ = 0;
     std::vector<Mat4> boneMats_;
+    std::vector<float> stage_; // reused interleave buffer for vertex uploads
 
     void uploadVertices(GpuPrim& gpuPrim, const Primitive& prim); // pos+normal -> dynamic VBO
     void uploadStatic(GpuPrim& gpuPrim, const Primitive& prim);   // uv/joints/weights -> static VBO

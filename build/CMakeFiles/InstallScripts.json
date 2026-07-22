@@ -1,9 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"D:/character_editor/build/cmake_install.cmake",
-		"D:/character_editor/build/external/glfw/cmake_install.cmake",
-		"D:/character_editor/build/external/glfw/src/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

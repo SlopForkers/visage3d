@@ -3,11 +3,13 @@
 #include "json.hpp"
 
 #include <algorithm>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <regex>
 #include <thread>
 #include <unordered_map>
 
@@ -17,15 +19,36 @@ void ClothingManager::bind(Model& body, Skeleton& skeleton) {
     body_ = &body;
     skeleton_ = &skeleton;
 
-    // find the skin of the largest skinned mesh instance (the body mesh)
+    // The body skin drives the mesh that spans the largest VERTICAL extent
+    // (legs..head). Picking the largest mesh by vertex count is wrong: VRM
+    // models often merge the face (+hair) into a dense mesh with its own
+    // skin, and clothing must follow the BODY skeleton, not face bones.
     bodySkinIndex_ = -1;
-    size_t best = 0;
+    float bestHeight = -1.f;
     for (const MeshInstance& inst : body.meshInstances) {
         if (inst.skin < 0) continue;
-        size_t verts = 0;
-        for (const Primitive& p : body.meshes[inst.mesh].prims) verts += p.pos.size();
-        if (verts > best) { best = verts; bodySkinIndex_ = inst.skin; }
+        bool anyNonHair = false;
+        Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+        for (const Primitive& p : body.meshes[inst.mesh].prims) {
+            if (p.material >= 0 && p.material < static_cast<int>(body.materials.size())) {
+                const std::string& mn_ = body.materials[p.material].name;
+                bool hair = mn_.find("HAIR") != std::string::npos ||
+                            mn_.find("Hair") != std::string::npos;
+                if (!hair) anyNonHair = true;
+            } else {
+                anyNonHair = true;
+            }
+            for (const Vec3& v : p.pos) {
+                mn.y = std::min(mn.y, v.y);
+                mx.y = std::max(mx.y, v.y);
+            }
+        }
+        if (!anyNonHair) continue; // pure-hair instance
+        float h = mx.y - mn.y;
+        if (h > bestHeight) { bestHeight = h; bodySkinIndex_ = inst.skin; }
     }
+    buildArmJointFlags();
+    cloudDirty_ = true;
 }
 
 // ---- helpers ----
@@ -88,19 +111,88 @@ struct GridKeyHash {
                (static_cast<size_t>(k.z) * 83492791u);
     }
 };
+
+Vec3 mul(const Mat3& m, const Vec3& v) {
+    return {m.m[0] * v.x + m.m[3] * v.y + m.m[6] * v.z,
+            m.m[1] * v.x + m.m[4] * v.y + m.m[7] * v.z,
+            m.m[2] * v.x + m.m[5] * v.y + m.m[8] * v.z};
+}
+
+// value at the given fraction of a sorted-by-nth_element copy (percentile)
+float percentile(std::vector<float>& v, float frac) {
+    if (v.empty()) return 0.f;
+    size_t k = static_cast<size_t>(frac * (v.size() - 1));
+    std::nth_element(v.begin(), v.begin() + k, v.end());
+    return v[k];
+}
 } // namespace
 
-std::vector<ClothingManager::BodyPoint> ClothingManager::buildBodyPointCloud() {
-    std::vector<BodyPoint> cloud;
-    if (bodySkinIndex_ < 0 || !body_) return cloud;
+struct ClothingManager::CloudGrid {
+    float cell = 0.05f;
+    std::unordered_multimap<GridKey, int, GridKeyHash> map;
+};
+
+ClothingManager::ClothingManager() = default;  // CloudGrid complete here
+ClothingManager::~ClothingManager() = default;
+
+// ---- body point cloud (cached, shared by all clothing items) ----
+
+void ClothingManager::buildArmJointFlags() {
+    armJoints_.clear();
+    if (!body_ || bodySkinIndex_ < 0 || bodySkinIndex_ >= static_cast<int>(body_->skins.size()))
+        return;
+    // mark node subtrees rooted at arm-related bones
+    std::vector<char> nodeArm(body_->nodes.size(), 0);
+    std::regex pat("(arm|shoulder|hand|wrist|elbow|finger|thumb|clavicle)",
+                   std::regex_constants::icase);
+    std::function<void(int, bool)> mark = [&](int i, bool under) {
+        bool a = under;
+        try {
+            a = a || std::regex_search(body_->nodes[i].name, pat);
+        } catch (...) { /* keep parent flag */ }
+        nodeArm[i] = a ? 1 : 0;
+        for (int c : body_->nodes[i].children) mark(c, a);
+    };
+    for (size_t i = 0; i < body_->nodes.size(); ++i)
+        if (body_->nodes[i].parent < 0) mark(static_cast<int>(i), false);
+
+    const Skin& skin = body_->skins[bodySkinIndex_];
+    armJoints_.resize(skin.joints.size());
+    for (size_t j = 0; j < skin.joints.size(); ++j) {
+        int n = skin.joints[j];
+        armJoints_[j] = (n >= 0 && n < static_cast<int>(nodeArm.size())) ? nodeArm[n] != 0
+                                                                         : false;
+    }
+}
+
+const std::vector<ClothingManager::BodyPoint>& ClothingManager::bodyCloud() {
+    if (!cloudDirty_) return cloud_;
+    cloud_.clear();
+    grid_.reset();
+    cloudDirty_ = false;
+    if (bodySkinIndex_ < 0 || !body_) return cloud_;
+
     // world matrices may be stale (parameters changed outside the frame loop)
     skeleton_->update();
     const Skin& skin = body_->skins[bodySkinIndex_];
+    const size_t nj = skin.joints.size();
 
-    // skin matrices in the CURRENT pose (so clothing fits the current shape)
-    std::vector<Mat4> jm(skin.joints.size());
-    for (size_t i = 0; i < skin.joints.size(); ++i)
+    // skin matrices in the CURRENT pose (so clothing fits the current shape).
+    // Per-joint normal matrices are precomputed once (linear blend of them is
+    // the standard approximation) instead of a per-vertex 3x3 inverse.
+    std::vector<Mat4> jm(nj);
+    std::vector<Mat3> jn(nj);
+    for (size_t i = 0; i < nj; ++i) {
         jm[i] = skeleton_->world()[skin.joints[i]] * skin.inverseBindMatrices[i];
+        jn[i] = jm[i].upper3x3().inverted().transposed();
+    }
+
+    size_t reserve = 0;
+    for (const MeshInstance& inst : body_->meshInstances)
+        if (inst.skin == bodySkinIndex_)
+            for (const Primitive& prim : body_->meshes[inst.mesh].prims)
+                reserve += prim.pos.size();
+    cloud_.reserve(reserve);
 
     for (const MeshInstance& inst : body_->meshInstances) {
         if (inst.skin != bodySkinIndex_) continue;
@@ -116,50 +208,137 @@ std::vector<ClothingManager::BodyPoint> ClothingManager::buildBodyPointCloud() {
             const std::vector<Vec3>& pos = prim.blendedPos.empty() ? prim.pos : prim.blendedPos;
             const std::vector<Vec3>& nrm =
                 prim.blendedNormal.empty() ? prim.normal : prim.blendedNormal;
+            const bool hasNrm = nrm.size() == pos.size();
             for (size_t v = 0; v < pos.size(); ++v) {
                 BodyPoint bp;
                 Mat4 skinM;
                 for (float& f : skinM.m) f = 0.f;
                 const uint16_t* j4 = &prim.joints[v * 4];
                 const float* w4 = &prim.weights[v].x;
+                int dominant = 0;
+                float domW = -1.f;
                 for (int k = 0; k < 4; ++k) {
                     bp.joints[k] = j4[k];
                     bp.weights[k] = w4[k];
-                    if (j4[k] < jm.size() && w4[k] > 0.f)
+                    if (j4[k] < nj && w4[k] > 0.f) {
                         for (int e = 0; e < 16; ++e) skinM.m[e] += jm[j4[k]].m[e] * w4[k];
+                        if (w4[k] > domW) { domW = w4[k]; dominant = j4[k]; }
+                    }
                 }
                 bp.pos = skinM.transformPoint(pos[v]);
-                if (v < nrm.size()) {
-                    Mat3 r3 = skinM.upper3x3().inverted().transposed();
-                    Vec3 n = nrm[v];
-                    bp.nrm = Vec3{r3.m[0] * n.x + r3.m[3] * n.y + r3.m[6] * n.z,
-                                  r3.m[1] * n.x + r3.m[4] * n.y + r3.m[7] * n.z,
-                                  r3.m[2] * n.x + r3.m[5] * n.y + r3.m[8] * n.z}
-                                 .normalized();
+                if (hasNrm) {
+                    Vec3 na{0, 0, 0};
+                    for (int k = 0; k < 4; ++k)
+                        if (j4[k] < nj && w4[k] > 0.f) na += mul(jn[j4[k]], nrm[v]) * w4[k];
+                    bp.nrm = na.length() > 1e-7f ? na.normalized() : Vec3{0, 1, 0};
                 } else {
                     bp.nrm = {0, 1, 0};
                 }
-                cloud.push_back(bp);
+                bp.arm = dominant < static_cast<int>(armJoints_.size()) && armJoints_[dominant];
+                cloud_.push_back(bp);
             }
         }
     }
-    return cloud;
+
+    // spatial hash over the cloud
+    grid_ = std::make_unique<CloudGrid>();
+    const float cell = grid_->cell;
+    grid_->map.reserve(cloud_.size() * 2);
+    for (size_t i = 0; i < cloud_.size(); ++i) {
+        const Vec3& p = cloud_[i].pos;
+        grid_->map.insert({{static_cast<int>(std::floor(p.x / cell)),
+                            static_cast<int>(std::floor(p.y / cell)),
+                            static_cast<int>(std::floor(p.z / cell))},
+                           static_cast<int>(i)});
+    }
+    return cloud_;
+}
+
+int ClothingManager::knnBody(const Vec3& p, int k, int* outIdx, float* outDistSq) const {
+    const CloudGrid& g = *grid_;
+    const float cell = g.cell;
+    const int cx = static_cast<int>(std::floor(p.x / cell));
+    const int cy = static_cast<int>(std::floor(p.y / cell));
+    const int cz = static_cast<int>(std::floor(p.z / cell));
+
+    int found = 0;
+    float worst = FLT_MAX; // largest distance^2 among the current top-k
+
+    auto consider = [&](int i) {
+        Vec3 d = cloud_[i].pos - p;
+        float d2 = d.dot(d);
+        if (found < k) {
+            outIdx[found] = i;
+            outDistSq[found] = d2;
+            ++found;
+            if (found == k) {
+                worst = 0.f;
+                for (int q = 0; q < k; ++q) worst = std::max(worst, outDistSq[q]);
+            }
+        } else if (d2 < worst) {
+            int farthest = 0;
+            for (int q = 1; q < k; ++q)
+                if (outDistSq[q] > outDistSq[farthest]) farthest = q;
+            outIdx[farthest] = i;
+            outDistSq[farthest] = d2;
+            worst = 0.f;
+            for (int q = 0; q < k; ++q) worst = std::max(worst, outDistSq[q]);
+        }
+    };
+
+    // Expanding Chebyshev shells. After shell r every unvisited cell is
+    // strictly farther than r*cell, so worst <= r*cell proves exactness.
+    constexpr int kMaxRing = 12; // 60 cm at 5 cm cells; brute force beyond that
+    for (int r = 0; r <= kMaxRing; ++r) {
+        for (int dx = -r; dx <= r; ++dx)
+            for (int dy = -r; dy <= r; ++dy)
+                for (int dz = -r; dz <= r; ++dz) {
+                    if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) != r)
+                        continue; // only the shell
+                    auto range = g.map.equal_range({cx + dx, cy + dy, cz + dz});
+                    for (auto it = range.first; it != range.second; ++it) consider(it->second);
+                }
+        if (found == k) {
+            float limit = r * cell;
+            if (worst <= limit * limit) return found;
+        }
+    }
+
+    // last resort: full scan (garment placed very far from the body)
+    for (size_t i = 0; i < cloud_.size(); ++i) consider(static_cast<int>(i));
+    return found;
+}
+
+float ClothingManager::bodyWidthInBand(float y0, float y1) const {
+    float cx, cz;
+    bodyAxisCenter(cx, cz);
+    std::vector<float> radii;
+    for (const BodyPoint& bp : cloud_) {
+        if (bp.arm) continue; // T-pose arms would dominate the chest band
+        if (bp.pos.y < y0 || bp.pos.y > y1) continue;
+        float dx = bp.pos.x - cx, dz = bp.pos.z - cz;
+        radii.push_back(dx * dx + dz * dz);
+    }
+    if (radii.size() < 16) return 0.f;
+    float r75 = std::sqrt(percentile(radii, 0.75f));
+    return 2.f * r75;
+}
+
+void ClothingManager::bodyAxisCenter(float& cx, float& cz) const {
+    cx = cz = 0.f;
+    if (cloud_.empty()) return;
+    Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
+    for (const BodyPoint& bp : cloud_) {
+        mn.x = std::min(mn.x, bp.pos.x); mx.x = std::max(mx.x, bp.pos.x);
+        mn.z = std::min(mn.z, bp.pos.z); mx.z = std::max(mx.z, bp.pos.z);
+    }
+    cx = (mn.x + mx.x) * 0.5f;
+    cz = (mn.z + mx.z) * 0.5f;
 }
 
 bool ClothingManager::transferWeights(ClothingItem& item) {
-    std::vector<BodyPoint> cloud = buildBodyPointCloud();
+    const std::vector<BodyPoint>& cloud = bodyCloud();
     if (cloud.empty()) return false;
-
-    // spatial hash over body points
-    const float cell = 0.05f;
-    std::unordered_multimap<GridKey, int, GridKeyHash> grid;
-    for (size_t i = 0; i < cloud.size(); ++i) {
-        const Vec3& p = cloud[i].pos;
-        grid.insert({{static_cast<int>(std::floor(p.x / cell)),
-                      static_cast<int>(std::floor(p.y / cell)),
-                      static_cast<int>(std::floor(p.z / cell))},
-                     static_cast<int>(i)});
-    }
 
     const Skin& skin = body_->skins[bodySkinIndex_];
     const int nj = static_cast<int>(skin.joints.size());
@@ -182,87 +361,32 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
             fit.targetPos.resize(nv);
 
             const Mat4 fitM = item.fitMatrix();
+            const Quat fitR = item.fitRot;
             // per-vertex worker (thread-safe: writes only own slot)
             auto process = [&](size_t v) {
                 Vec3 cp = fitM.transformPoint(prim.pos[v]);
 
-                // k nearest body points: rings 1-2 of the hash grid, then brute
-                // force over the whole cloud (cheaper than scanning far rings)
                 constexpr int K = 4;
                 int idx[K];
-                float dist[K];
-                int found = 0;
-                int cx = static_cast<int>(std::floor(cp.x / cell));
-                int cy = static_cast<int>(std::floor(cp.y / cell));
-                int cz = static_cast<int>(std::floor(cp.z / cell));
-                for (int ring = 1; ring <= 2; ++ring) {
-                    for (int dx = -ring; dx <= ring; ++dx)
-                        for (int dy = -ring; dy <= ring; ++dy)
-                            for (int dz = -ring; dz <= ring; ++dz) {
-                                if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) != ring)
-                                    continue; // only the shell
-                                auto range = grid.equal_range({cx + dx, cy + dy, cz + dz});
-                                for (auto it = range.first; it != range.second; ++it) {
-                                    float d = (cloud[it->second].pos - cp).length();
-                                    if (found < K) {
-                                        idx[found] = it->second;
-                                        dist[found] = d;
-                                        ++found;
-                                    } else {
-                                        int farthest = 0;
-                                        for (int q = 1; q < K; ++q)
-                                            if (dist[q] > dist[farthest]) farthest = q;
-                                        if (d < dist[farthest]) {
-                                            idx[farthest] = it->second;
-                                            dist[farthest] = d;
-                                        }
-                                    }
-                                }
-                            }
-                }
-                {
-                    // verify with brute force: guarantees exact K nearest
-                    bool needBrute = found < K;
-                    if (!needBrute) {
-                        float kth = 0.f;
-                        for (int q = 0; q < K; ++q) kth = std::max(kth, dist[q]);
-                        needBrute = kth > 2.f * cell; // ring 2 covers only 2 cells
-                    }
-                    if (needBrute) {
-                        for (size_t q = 0; q < cloud.size(); ++q) {
-                            float d = (cloud[q].pos - cp).length();
-                            if (found < K) {
-                                idx[found] = static_cast<int>(q);
-                                dist[found] = d;
-                                ++found;
-                            } else {
-                                int farthest = 0;
-                                for (int t = 1; t < K; ++t)
-                                    if (dist[t] > dist[farthest]) farthest = t;
-                                if (d < dist[farthest]) {
-                                    idx[farthest] = static_cast<int>(q);
-                                    dist[farthest] = d;
-                                }
-                            }
-                        }
-                    }
-                }
+                float dsq[K];
+                int found = knnBody(cp, K, idx, dsq);
 
                 // accumulate per-joint weights with inverse-square falloff
                 float acc[128] = {}; // nj <= 80 in practice
                 Vec3 nrmSum{0, 0, 0};
                 for (int q = 0; q < found; ++q) {
-                    float w = 1.f / (dist[q] * dist[q] + 1e-8f);
+                    float w = 1.f / (dsq[q] + 1e-8f);
                     const BodyPoint& bp = cloud[idx[q]];
                     for (int k = 0; k < 4; ++k)
-                        if (bp.joints[k] < nj) acc[bp.joints[k]] += bp.weights[k] * w;
+                        if (bp.joints[k] < nj && bp.joints[k] < 128)
+                            acc[bp.joints[k]] += bp.weights[k] * w;
                     nrmSum += bp.nrm * w;
                 }
                 // pick top-4 joints, normalize
                 int top[4] = {-1, -1, -1, -1};
                 for (int k = 0; k < 4; ++k) {
                     float best = 0.f;
-                    for (int j = 0; j < nj; ++j) {
+                    for (int j = 0; j < nj && j < 128; ++j) {
                         bool used = false;
                         for (int q = 0; q < k; ++q) used = used || top[q] == j;
                         if (!used && acc[j] > best) { best = acc[j]; top[k] = j; }
@@ -283,7 +407,7 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
                 // nearest single body point (shrink target)
                 int nearest = 0;
                 for (int q = 1; q < found; ++q)
-                    if (dist[q] < dist[nearest]) nearest = q;
+                    if (dsq[q] < dsq[nearest]) nearest = q;
                 Vec3 target = cloud[idx[nearest]].pos;
 
                 // padding direction: smoothed body surface normal (true outward,
@@ -292,7 +416,7 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
                 if (nrmSum.length() > 1e-6f)
                     dir = nrmSum.normalized();
                 else if (v < prim.normal.size())
-                    dir = prim.normal[v];
+                    dir = fitR.rotate(prim.normal[v]);
 
                 fit.basePos[v] = cp;
                 fit.pushDir[v] = dir;
@@ -303,10 +427,13 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
                 float sd = (cp - target).dot(dir);
                 Vec3 base = sd < item.padding ? surfacePos : cp;
                 prim.blendedPos[v] = base * (1.f - item.shrink) + surfacePos * item.shrink;
+                // normals follow the fit rotation (uniform scale keeps direction)
+                if (v < prim.normal.size())
+                    prim.blendedNormal[v] = fitR.rotate(prim.normal[v]);
             };
 
             // parallel chunks for large prims
-            unsigned nt = nv > 20000 ? std::min(8u, std::thread::hardware_concurrency()) : 1;
+            unsigned nt = nv > 4000 ? std::min(8u, std::thread::hardware_concurrency()) : 1;
             if (nt <= 1) {
                 for (size_t v = 0; v < nv; ++v) process(v);
             } else {
@@ -330,10 +457,13 @@ bool ClothingManager::transferWeights(ClothingItem& item) {
 void ClothingManager::applyPadding(int index) {
     if (index < 0 || index >= static_cast<int>(items_.size())) return;
     ClothingItem& item = items_[index];
+    if (item.fits.size() != item.model.meshes.size()) return; // no transfer yet
     for (size_t mi = 0; mi < item.model.meshes.size(); ++mi)
         for (size_t pi = 0; pi < item.model.meshes[mi].prims.size(); ++pi) {
+            if (pi >= item.fits[mi].size()) break;
             Primitive& prim = item.model.meshes[mi].prims[pi];
             const ClothingItem::PrimFit& fit = item.fits[mi][pi];
+            if (fit.targetPos.size() != prim.blendedPos.size()) continue;
             for (size_t v = 0; v < prim.blendedPos.size(); ++v) {
                 Vec3 surfacePos = fit.targetPos[v] + fit.pushDir[v] * item.padding;
                 float sd = (fit.basePos[v] - fit.targetPos[v]).dot(fit.pushDir[v]);
@@ -350,16 +480,27 @@ void ClothingManager::applyFit(int index) {
     if (index < 0 || index >= static_cast<int>(items_.size())) return;
     ClothingItem& item = items_[index];
     Mat4 m = item.fitMatrix();
+    const Quat r = item.fitRot;
+    const bool haveFits = item.fits.size() == item.model.meshes.size();
     for (size_t mi = 0; mi < item.model.meshes.size(); ++mi)
         for (size_t pi = 0; pi < item.model.meshes[mi].prims.size(); ++pi) {
             Primitive& prim = item.model.meshes[mi].prims[pi];
-            const ClothingItem::PrimFit& fit = item.fits[mi][pi];
-            for (size_t v = 0; v < prim.blendedPos.size(); ++v) {
+            const bool clamp = haveFits && pi < item.fits[mi].size() &&
+                               item.fits[mi][pi].targetPos.size() == prim.pos.size();
+            const ClothingItem::PrimFit* fit = clamp ? &item.fits[mi][pi] : nullptr;
+            if (prim.blendedNormal.size() != prim.pos.size()) prim.blendedNormal = prim.normal;
+            for (size_t v = 0; v < prim.pos.size(); ++v) {
                 Vec3 cp = m.transformPoint(prim.pos[v]);
-                Vec3 surfacePos = fit.targetPos[v] + fit.pushDir[v] * item.padding;
-                float sd = (cp - fit.targetPos[v]).dot(fit.pushDir[v]);
-                Vec3 base = sd < item.padding ? surfacePos : cp;
-                prim.blendedPos[v] = base * (1.f - item.shrink) + surfacePos * item.shrink;
+                Vec3 out = cp;
+                if (fit) {
+                    Vec3 surfacePos = fit->targetPos[v] + fit->pushDir[v] * item.padding;
+                    float sd = (cp - fit->targetPos[v]).dot(fit->pushDir[v]);
+                    Vec3 base = sd < item.padding ? surfacePos : cp;
+                    out = base * (1.f - item.shrink) + surfacePos * item.shrink;
+                }
+                prim.blendedPos[v] = out;
+                if (v < prim.normal.size())
+                    prim.blendedNormal[v] = r.rotate(prim.normal[v]);
             }
         }
 }
@@ -370,152 +511,7 @@ void ClothingManager::refit(int index) {
     item.weightsReady = transferWeights(item);
 }
 
-// ---- auto fit (coordinate descent over scale + offset) ----
-
-struct ClothingManager::CloudGrid {
-    float cell;
-    const std::vector<BodyPoint>* cloud;
-    std::unordered_multimap<GridKey, int, GridKeyHash> map;
-};
-
-std::unique_ptr<ClothingManager::CloudGrid>
-ClothingManager::makeGrid(const std::vector<BodyPoint>& cloud, float cell) {
-    auto g = std::make_unique<CloudGrid>();
-    g->cell = cell;
-    g->cloud = &cloud;
-    for (size_t i = 0; i < cloud.size(); ++i) {
-        const Vec3& p = cloud[i].pos;
-        g->map.insert({{static_cast<int>(std::floor(p.x / cell)),
-                        static_cast<int>(std::floor(p.y / cell)),
-                        static_cast<int>(std::floor(p.z / cell))},
-                       static_cast<int>(i)});
-    }
-    return g;
-}
-
-float ClothingManager::distToCloud(const Vec3& p, const CloudGrid& grid) const {
-    int cx = static_cast<int>(std::floor(p.x / grid.cell));
-    int cy = static_cast<int>(std::floor(p.y / grid.cell));
-    int cz = static_cast<int>(std::floor(p.z / grid.cell));
-    for (int ring = 1; ring <= 4; ++ring) {
-        float best = 1e30f;
-        for (int dx = -ring; dx <= ring; ++dx)
-            for (int dy = -ring; dy <= ring; ++dy)
-                for (int dz = -ring; dz <= ring; ++dz) {
-                    if (std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) != ring) continue;
-                    auto range = grid.map.equal_range({cx + dx, cy + dy, cz + dz});
-                    for (auto it = range.first; it != range.second; ++it)
-                        best = std::min(best, ((*grid.cloud)[it->second].pos - p).length());
-                }
-        if (best < 1e29f) return best;
-    }
-    return 0.5f; // capped penalty for far-away points
-}
-
-void ClothingManager::autoFitToBody(int index) {
-    if (index < 0 || index >= static_cast<int>(items_.size()) || !body_) return;
-    ClothingItem& item = items_[index];
-
-    std::vector<BodyPoint> cloud = buildBodyPointCloud();
-    if (cloud.empty()) return;
-    auto grid = makeGrid(cloud, 0.04f);
-
-    // sample clothing vertices (raw positions)
-    std::vector<Vec3> samples;
-    size_t total = 0;
-    for (const Mesh& m : item.model.meshes)
-        for (const Primitive& p : m.prims) total += p.pos.size();
-    size_t stride = std::max<size_t>(1, total / 1200);
-    for (const Mesh& m : item.model.meshes)
-        for (const Primitive& p : m.prims)
-            for (size_t v = 0; v < p.pos.size(); v += stride) samples.push_back(p.pos[v]);
-    if (samples.empty()) return;
-
-    // scaling pivot: bbox center in X/Z, bbox bottom in Y — resizing keeps the
-    // garment's position and hem instead of shifting it around the origin
-    const Mat4 fitM = item.fitMatrix();
-    Vec3 pivot;
-    {
-        Vec3 pmn{1e30f, 1e30f, 1e30f}, pmx{-1e30f, -1e30f, -1e30f};
-        for (const Vec3& s : samples) {
-            Vec3 w = fitM.transformPoint(s);
-            pmn.x = std::min(pmn.x, w.x); pmx.x = std::max(pmx.x, w.x);
-            pmn.y = std::min(pmn.y, w.y); pmx.y = std::max(pmx.y, w.y);
-            pmn.z = std::min(pmn.z, w.z); pmx.z = std::max(pmx.z, w.z);
-        }
-        pivot = {(pmn.x + pmx.x) * 0.5f, pmn.y, (pmn.z + pmx.z) * 0.5f};
-    }
-
-    // metric: mean distance with distances capped at 25cm — robust to baggy
-    // garment regions (they contribute a constant, not a runaway gradient).
-    // An inertia penalty keeps the garment near its authored placement unless
-    // a clearly better fit exists (small garments otherwise "migrate" to the
-    // wrong body region — panties fit hips, chest and armpit equally well).
-    auto metric = [&](float scale, const Vec3& off, double& outMean) {
-        double sum = 0.0;
-        for (const Vec3& s : samples) {
-            Vec3 w = fitM.transformPoint(s);
-            Vec3 ws = pivot + (w - pivot) * scale + off;
-            float d = distToCloud(ws, *grid);
-            sum += std::min(d, 0.25f);
-        }
-        outMean = sum / samples.size();
-        double penalty = 2.0 * off.length() + 0.5 * std::fabs(1.0 - scale);
-        return -(outMean + penalty); // "higher is better" convention
-    };
-
-    // init: center X/Z only — garments are authored ground-aligned, keep authored Y
-    Vec3 cmn{1e30f, 1e30f, 1e30f}, cmx{-1e30f, -1e30f, -1e30f};
-    for (const Vec3& s : samples) {
-        Vec3 w = fitM.transformPoint(s);
-        cmn.x = std::min(cmn.x, w.x); cmx.x = std::max(cmx.x, w.x);
-        cmn.z = std::min(cmn.z, w.z); cmx.z = std::max(cmx.z, w.z);
-    }
-    Vec3 bmn{1e30f, 1e30f, 1e30f}, bmx{-1e30f, -1e30f, -1e30f};
-    for (const BodyPoint& bp : cloud) {
-        bmn.x = std::min(bmn.x, bp.pos.x); bmx.x = std::max(bmx.x, bp.pos.x);
-        bmn.z = std::min(bmn.z, bp.pos.z); bmx.z = std::max(bmx.z, bp.pos.z);
-    }
-    item.fitOffset.x += (bmn.x + bmx.x - cmn.x - cmx.x) * 0.5f;
-    item.fitOffset.z += (bmn.z + bmx.z - cmn.z - cmx.z) * 0.5f;
-
-    // greedy coordinate descent; bounded to avoid degenerate/runaway fits
-    float scale = 1.f; // multiplicative delta around the pivot
-    Vec3 off{0, 0, 0};
-    double bestMean = 1e9;
-    double best = metric(1.f, off, bestMean);
-    const float offs[] = {-0.03f, -0.015f, 0.015f, 0.03f};
-    const float scl[] = {-0.05f, -0.02f, 0.02f, 0.05f};
-    for (int round = 0; round < 4; ++round) {
-        bool improved = false;
-        for (int axis = 0; axis < 3; ++axis) {
-            if (axis == 1) continue; // keep authored ground alignment in Y
-            for (float d : offs) {
-                Vec3 tryOff = off;
-                (&tryOff.x)[axis] += d;
-                if (tryOff.length() > 0.25f) continue; // stay near the init position
-                double mean;
-                double m = metric(scale, tryOff, mean);
-                if (m > best) { best = m; bestMean = mean; off = tryOff; improved = true; }
-            }
-        }
-        for (float d : scl) {
-            float tryScale = std::clamp(scale * (1.f + d), 0.85f, 1.2f);
-            double mean;
-            double m = metric(tryScale, off, mean);
-            if (m > best) { best = m; bestMean = mean; scale = tryScale; improved = true; }
-        }
-        if (!improved) break;
-    }
-    // w' = pivot + (w - pivot)*scale + off  <=>  uniform scale commutes, so:
-    //   newFitScale = fitScale * scale
-    //   newOffset   = pivot + (fitOffset - pivot) * scale + off
-    //   rotation unchanged
-    item.fitOffset = pivot + (item.fitOffset - pivot) * scale + off;
-    item.fitScale *= scale;
-}
-
-int ClothingManager::add(const std::string& path, std::string& err) {
+int ClothingManager::add(const std::string& path, std::string& err, bool deferFit) {
     auto now = [] { return std::chrono::steady_clock::now(); };
     auto ms = [](auto a, auto b) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
@@ -533,7 +529,7 @@ int ClothingManager::add(const std::string& path, std::string& err) {
     item.fitScale = autoUnitScale(item.model);
     item.unitScale = item.fitScale;
 
-    // raw bbox center (gizmo pivot)
+    // raw bbox (gizmo pivot + size-to-body reference)
     {
         Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
         for (const Mesh& m : item.model.meshes)
@@ -544,39 +540,45 @@ int ClothingManager::add(const std::string& path, std::string& err) {
                     mx.x = std::max(mx.x, v.x); mx.y = std::max(mx.y, v.y);
                     mx.z = std::max(mx.z, v.z);
                 }
+        item.rawMin = mn;
+        item.rawMax = mx;
         item.rawCenter = (mn + mx) * 0.5f;
     }
 
+    // type from the file path (Sketchfab exports are all "scene.gltf" —
+    // keywords live in the dir name) and the equipment slot it implies
+    item.type = detectType(item.path);
+    item.slot = slotForType(item.type);
+
     items_.push_back(std::move(item));
     int idx = static_cast<int>(items_.size()) - 1;
+    if (onItemsChanged) onItemsChanged(); // vector may have reallocated
     auto t1 = now();
-    autoFitToBody(idx); // coarse alignment before weight transfer
-    // type anchor: if the file path reveals the garment type, snap it into place
-    // (Sketchfab exports are all "scene.gltf" — keywords live in the dir name)
-    {
-        std::string detected = detectType(items_[idx].path);
-        if (detected != "auto") applyType(idx, detected);
+    if (!deferFit) {
+        applyType(idx, items_[idx].type, true); // anchor + size-to-body
+        refit(idx);
     }
     auto t2 = now();
-    refit(idx);
-    auto t3 = now();
-    std::fprintf(stderr, "  clothing timings: load %lldms, autofit %lldms, transfer %lldms\n",
-                 ms(t0, t1), ms(t1, t2), ms(t2, t3));
+    std::fprintf(stderr, "  clothing timings: load %lldms, place+transfer %lldms\n",
+                 ms(t0, t1), ms(t1, t2));
     const ClothingItem& it = items_[idx];
     std::fprintf(stderr,
-                 "  fit: unitScale=%.4g scale=%.4g offset=(%.3f %.3f %.3f) weights=%d\n",
+                 "  fit: unitScale=%.4g scale=%.4g offset=(%.3f %.3f %.3f) type=%s slot=%s "
+                 "weights=%d\n",
                  it.unitScale, it.fitScale, it.fitOffset.x, it.fitOffset.y, it.fitOffset.z,
-                 it.weightsReady ? 1 : 0);
+                 it.type.c_str(), it.slot.c_str(), it.weightsReady ? 1 : 0);
     return idx;
 }
 
 void ClothingManager::remove(int index) {
     if (index < 0 || index >= static_cast<int>(items_.size())) return;
     items_.erase(items_.begin() + index);
+    if (onItemsChanged) onItemsChanged(); // elements shifted
 }
 
 void ClothingManager::clear() {
     items_.clear();
+    if (onItemsChanged) onItemsChanged();
 }
 
 // ---- clothing types with anchor offsets ----
@@ -593,7 +595,8 @@ const char* kBuiltinTypes = R"json({
     { "id": "bra",     "name": "Лиф / бюстгальтер","yOffset": 1.26, "bottomAlign": false },
     { "id": "dress",   "name": "Платье",           "yOffset": 0.95, "bottomAlign": false },
     { "id": "shoes",   "name": "Обувь",            "yOffset": 0.0,  "bottomAlign": true },
-    { "id": "head",    "name": "Голова / волосы",  "yOffset": 1.45, "bottomAlign": false }
+    { "id": "head",    "name": "Голова / волосы",  "yOffset": 1.45, "bottomAlign": false },
+    { "id": "accessory", "name": "Аксессуар",      "yOffset": 0.0,  "bottomAlign": false }
   ]
 })json";
 } // namespace
@@ -617,6 +620,9 @@ void ClothingManager::loadTypes(const std::string& configPath) {
         p.bottomAlign = t.value("bottomAlign", false);
         if (!p.id.empty()) types_.push_back(std::move(p));
     }
+
+    slots_ = {{"top", "Верх"},       {"bottom", "Низ"},      {"dress", "Платье"},
+              {"shoes", "Обувь"},    {"hair", "Причёска"},   {"accessory", "Аксессуар"}};
 }
 
 bool ClothingManager::saveTypes(const std::string& configPath) const {
@@ -646,7 +652,25 @@ const ClothTypePreset* ClothingManager::typePreset(const std::string& typeId) co
     return nullptr;
 }
 
-std::string ClothingManager::detectType(const std::string& fileName) const {
+std::string ClothingManager::slotForType(const std::string& typeId) {
+    if (typeId == "top" || typeId == "bra") return "top";
+    if (typeId == "panties" || typeId == "shorts" || typeId == "pants" || typeId == "skirt")
+        return "bottom";
+    if (typeId == "dress") return "dress";
+    if (typeId == "shoes") return "shoes";
+    if (typeId == "head") return "hair";
+    if (typeId == "accessory") return "accessory";
+    return {};
+}
+
+int ClothingManager::itemInSlot(const std::string& slotId) const {
+    if (slotId.empty()) return -1;
+    for (size_t i = 0; i < items_.size(); ++i)
+        if (items_[i].slot == slotId) return static_cast<int>(i);
+    return -1;
+}
+
+std::string ClothingManager::detectType(const std::string& fileName) {
     std::string n = fileName;
     std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return std::tolower(c); });
     auto hasAny = [&](std::initializer_list<const char*> ks) {
@@ -668,36 +692,99 @@ std::string ClothingManager::detectType(const std::string& fileName) const {
     if (hasAny({"hoodie", "sweater", "shirt", "top", "blouse", "jacket", "coat"})) return "top";
     if (hasAny({"shoes", "boots", "sneakers", "heels"})) return "shoes";
     if (hasAny({"hair", "hat", "cap"})) return "head";
+    if (hasAny({"necklace", "earring", "glasses", "sunglass", "watch", "bracelet", "jewel",
+                "crown", "tiara", "ribbon", "backpack", "bag", "belt", "choker", "piercing",
+                "accessory"}))
+        return "accessory";
     return "auto";
 }
 
-void ClothingManager::applyType(int index, const std::string& typeId) {
+namespace {
+// Axis-aligned bbox of the raw mesh bbox under rot*scale (8 corner transform —
+// cheap and tight enough for anchoring / width matching).
+void bboxUnderRS(const ClothingItem& item, float scale, Vec3& outMn, Vec3& outMx) {
+    Mat4 rs = Mat4::rotation(item.fitRot) * Mat4::scaling({scale, scale, scale});
+    outMn = {1e30f, 1e30f, 1e30f};
+    outMx = {-1e30f, -1e30f, -1e30f};
+    for (int c = 0; c < 8; ++c) {
+        Vec3 corner{(c & 1) ? item.rawMax.x : item.rawMin.x,
+                    (c & 2) ? item.rawMax.y : item.rawMin.y,
+                    (c & 4) ? item.rawMax.z : item.rawMin.z};
+        Vec3 w = rs.transformPoint(corner);
+        outMn.x = std::min(outMn.x, w.x); outMx.x = std::max(outMx.x, w.x);
+        outMn.y = std::min(outMn.y, w.y); outMx.y = std::max(outMx.y, w.y);
+        outMn.z = std::min(outMn.z, w.z); outMx.z = std::max(outMx.z, w.z);
+    }
+}
+} // namespace
+
+void ClothingManager::applyType(int index, const std::string& typeId, bool scaleToBody) {
     if (index < 0 || index >= static_cast<int>(items_.size())) return;
     ClothingItem& item = items_[index];
     item.type = typeId;
+    item.slot = slotForType(typeId);
     const ClothTypePreset* preset = typePreset(typeId);
-    if (!preset || typeId == "auto") return;
+    if (!preset || typeId == "auto" || typeId == "accessory")
+        return; // authored placement kept as-is
 
-    // garment bbox at the current fitScale+rotation (world = R*S*raw + fitOffset)
-    Mat4 rs = item.fitMatrixNoTrans();
-    Vec3 mn{1e30f, 1e30f, 1e30f}, mx{-1e30f, -1e30f, -1e30f};
-    for (const Mesh& m : item.model.meshes)
-        for (const Primitive& p : m.prims)
-            for (const Vec3& v : p.pos) {
-                Vec3 w = rs.transformPoint(v);
-                mn.x = std::min(mn.x, w.x); mx.x = std::max(mx.x, w.x);
-                mn.y = std::min(mn.y, w.y); mx.y = std::max(mx.y, w.y);
-                mn.z = std::min(mn.z, w.z); mx.z = std::max(mx.z, w.z);
-            }
-    if (mn.x > mx.x) return;
+    const std::vector<BodyPoint>& cloud = bodyCloud();
+    float cx, cz;
+    bodyAxisCenter(cx, cz);
 
-    // center X/Z on the body axis, move to the anchor height
-    item.fitOffset.x = -(mn.x + mx.x) * 0.5f;
-    item.fitOffset.z = -(mn.z + mx.z) * 0.5f;
-    if (preset->bottomAlign)
-        item.fitOffset.y = preset->yOffset - mn.y;
-    else
-        item.fitOffset.y = preset->yOffset - (mn.y + mx.y) * 0.5f;
+    auto anchor = [&](float scale, Vec3& outOff, Vec3& outMn, Vec3& outMx) {
+        bboxUnderRS(item, scale, outMn, outMx);
+        outOff.x = cx - (outMn.x + outMx.x) * 0.5f;
+        outOff.z = cz - (outMn.z + outMx.z) * 0.5f;
+        if (preset->bottomAlign)
+            outOff.y = preset->yOffset - outMn.y;
+        else
+            outOff.y = preset->yOffset - (outMn.y + outMx.y) * 0.5f;
+    };
+
+    float scale = item.fitScale;
+    if (scaleToBody && !cloud.empty()) {
+        // Provisional anchor at the authored unit scale to find the world
+        // height band; then match the garment width against the body width
+        // measured in that band (top 30% of the garment — waistband / chest —
+        // or the bottom part for shoes).
+        Vec3 off, mn, mx;
+        anchor(item.unitScale, off, mn, mx);
+        float h = mx.y - mn.y;
+        float y0, y1;
+        if (preset->bottomAlign) {
+            y0 = preset->yOffset;
+            y1 = preset->yOffset + std::max(0.12f, 0.5f * h);
+        } else {
+            y1 = off.y + mx.y;
+            y0 = y1 - 0.3f * h;
+        }
+        float bodyW = bodyWidthInBand(y0, y1);
+        // garment width: radial 65th percentile of its vertices inside the band
+        float garmentW = 0.f;
+        {
+            Mat4 prov = Mat4::translation(off) * Mat4::rotation(item.fitRot) *
+                        Mat4::scaling({item.unitScale, item.unitScale, item.unitScale});
+            std::vector<float> radii;
+            for (const Mesh& m : item.model.meshes)
+                for (const Primitive& p : m.prims)
+                    for (const Vec3& v : p.pos) {
+                        Vec3 w = prov.transformPoint(v);
+                        if (w.y < y0 || w.y > y1) continue;
+                        float dx = w.x - cx, dz = w.z - cz;
+                        radii.push_back(dx * dx + dz * dz);
+                    }
+            if (radii.size() >= 16)
+                garmentW = 2.f * std::sqrt(percentile(radii, 0.65f));
+        }
+        if (bodyW > 0.01f && garmentW > 0.01f) {
+            float k = std::clamp(1.05f * bodyW / garmentW, 0.55f, 2.4f);
+            scale = item.unitScale * k;
+            item.fitScale = scale;
+        }
+    }
+
+    Vec3 mn, mx;
+    anchor(scale, item.fitOffset, mn, mx);
 }
 
 } // namespace ce
