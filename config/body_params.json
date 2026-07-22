@@ -94,5 +94,23 @@
         { "translate": { "bones": ["J_Adj_L_FaceEye", "J_Adj_R_FaceEye"], "patterns": ["(?i)face_?eye$"], "axis": [0.0, 1.0, 0.0], "factor": 0.015, "mode": "value" } }
       ]
     }
+  ],
+
+  "effectorAnchors": {
+    "comment2": "Кости-якоря вершинных эффекторов (соски): apex = самая удалённая от кости вершина с весом на неё. bones — точные имена, patterns — regex.",
+    "bones": ["J_Sec_L_Bust1", "J_Sec_R_Bust1"],
+    "patterns": ["(?i)(bust|breast)_?[lr]?_?1$", "(?i)^mune_[lr]$"]
+  },
+  "effectorParams": [
+    { "id": "nipple_length", "name": "Соски: выпирание", "group": "Соски",
+      "kind": "protrude", "min": 0.0, "max": 0.03 },
+    { "id": "nipple_width", "name": "Соски: ширина", "group": "Соски",
+      "kind": "tipRadius", "min": 0.004, "max": 0.02, "def": 0.5 },
+    { "id": "areola_size", "name": "Ореола: размер", "group": "Соски",
+      "kind": "areolaRadius", "min": 0.01, "max": 0.05, "def": 0.4 },
+    { "id": "areola_bulge", "name": "Ореола: выпуклость", "group": "Соски",
+      "kind": "bulge", "min": 0.0, "max": 0.012 },
+    { "id": "areola_tint", "name": "Ореола: затемнение", "group": "Соски",
+      "kind": "tint", "min": 0.0, "max": 1.0 }
   ]
 }

@@ -43,6 +43,7 @@ public:
     float outlineWidth = 2.f; // px
     bool hairVisible = true;
     float hairTint[3] = {1.f, 1.f, 1.f};
+    float areolaColor[3] = {0.72f, 0.45f, 0.42f}; // tint multiplier (areola)
     bool autoRefit = true; // debounced clothing refit on body-shape change
     int selectedClothing = -1; // gizmo target (index into ClothingManager::items)
     int gizmoMode = 0;         // 0 translate, 1 rotate, 2 scale

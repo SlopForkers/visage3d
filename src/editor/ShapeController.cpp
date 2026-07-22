@@ -34,6 +34,23 @@ const char* kBuiltinRules = R"json({
       "bones": ["J_Bip_C_Spine"],
       "patterns": ["(?i)spine_?1?$", "(?i)^(spine|waist)$"],
       "min": 0.75, "max": 1.35, "axes": [1.0, 0.0, 1.0], "compensate": true }
+  ],
+
+  "effectorAnchors": {
+    "bones": ["J_Sec_L_Bust1", "J_Sec_R_Bust1"],
+    "patterns": ["(?i)(bust|breast)_?[lr]?_?1$", "(?i)^mune_[lr]$"]
+  },
+  "effectorParams": [
+    { "id": "nipple_length", "name": "Соски: выпирание", "group": "Соски",
+      "kind": "protrude", "min": 0.0, "max": 0.03 },
+    { "id": "nipple_width", "name": "Соски: ширина", "group": "Соски",
+      "kind": "tipRadius", "min": 0.004, "max": 0.02, "def": 0.5 },
+    { "id": "areola_size", "name": "Ореола: размер", "group": "Соски",
+      "kind": "areolaRadius", "min": 0.01, "max": 0.05, "def": 0.4 },
+    { "id": "areola_bulge", "name": "Ореола: выпуклость", "group": "Соски",
+      "kind": "bulge", "min": 0.0, "max": 0.012 },
+    { "id": "areola_tint", "name": "Ореола: затемнение", "group": "Соски",
+      "kind": "tint", "min": 0.0, "max": 1.0 }
   ]
 })json";
 
@@ -46,7 +63,11 @@ void ShapeController::bind(Model& model, Skeleton& skeleton) {
 
 void ShapeController::scan(const std::string& configPath) {
     params_.clear();
+    effAnchors_.clear();
+    for (int& i : effParam_) i = -1;
+    for (float& f : effLast_) f = -1.f;
     addBoneParamsFromRules(configPath);
+    addEffectorParams(configPath);
     addMorphParams();
     apply();
     morphsDirty = true;
@@ -189,6 +210,215 @@ void ShapeController::addBoneParamsFromRules(const std::string& configPath) {
     }
 }
 
+// ---- vertex effectors (nipple / areola) ----
+
+void ShapeController::addEffectorParams(const std::string& configPath) {
+    nlohmann::json rules;
+    {
+        std::ifstream f(configPath);
+        if (f) {
+            try { rules = nlohmann::json::parse(f); }
+            catch (...) { rules = nlohmann::json::object(); }
+        }
+    }
+    nlohmann::json builtin = nlohmann::json::parse(kBuiltinRules);
+    if (!rules.contains("effectorParams")) rules["effectorParams"] = builtin["effectorParams"];
+    if (!rules.contains("effectorAnchors"))
+        rules["effectorAnchors"] = builtin["effectorAnchors"];
+
+    auto kindOf = [](const std::string& k) -> ShapeParam::Effect {
+        if (k == "tipRadius") return ShapeParam::Effect::TipRadius;
+        if (k == "areolaRadius") return ShapeParam::Effect::AreolaRadius;
+        if (k == "bulge") return ShapeParam::Effect::Bulge;
+        if (k == "tint") return ShapeParam::Effect::Tint;
+        return ShapeParam::Effect::Protrude;
+    };
+
+    bool any = false;
+    for (const auto& r : rules["effectorParams"]) {
+        ShapeParam p;
+        p.type = ShapeParam::Type::VertexEffect;
+        p.id = r.value("id", std::string{});
+        p.name = r.value("name", p.id);
+        p.group = r.value("group", std::string{"Соски"});
+        p.effect = kindOf(r.value("kind", std::string{"protrude"}));
+        p.minS = r.value("min", 0.f);
+        p.maxS = r.value("max", 1.f);
+        p.defValue = r.value("def", 0.f);
+        p.value = p.defValue;
+        if (p.id.empty() || find(p.id)) continue;
+        effParam_[static_cast<int>(p.effect)] = static_cast<int>(params_.size());
+        params_.push_back(std::move(p));
+        any = true;
+    }
+
+    if (any) {
+        std::vector<std::string> names, patterns;
+        readNamesPatterns(rules["effectorAnchors"], names, patterns);
+        buildEffectorAnchors(names, patterns);
+    }
+}
+
+void ShapeController::buildEffectorAnchors(const std::vector<std::string>& names,
+                                           const std::vector<std::string>& patterns) {
+    if (!model_ || !skeleton_) return;
+    skeleton_->update(); // world = bind pose right after bind()
+    constexpr float kMaxRadius = 0.06f;  // hard cap of the affected region (m)
+    constexpr float kMinBoneWeight = 0.25f;
+
+    for (int node : matchBones(names, patterns)) {
+        // Candidate (skin, joint) pairs containing this bone. A bone may be
+        // listed in several skins (face + body): the right one actually OWNS
+        // vertices weighted to it.
+        struct Cand {
+            int skin, joint;
+        };
+        std::vector<Cand> cands;
+        for (size_t si = 0; si < model_->skins.size(); ++si)
+            for (size_t j = 0; j < model_->skins[si].joints.size(); ++j)
+                if (model_->skins[si].joints[j] == node)
+                    cands.push_back({static_cast<int>(si), static_cast<int>(j)});
+
+        // The bone chain tip points at the nipple (VRoid: Bust1 -> Bust2).
+        // Use the first child that is also a skin joint; fall back to the bone
+        // itself when there is no suitable child.
+        int tipNode = node;
+        for (int child : model_->nodes[node].children) {
+            bool inSkin = false;
+            for (const Cand& c : cands)
+                for (int jn : model_->skins[c.skin].joints)
+                    if (jn == child) { inSkin = true; break; }
+            if (inSkin) { tipNode = child; break; }
+        }
+        const Mat4& wm = skeleton_->world()[tipNode];
+        Vec3 bonePos{wm.m[12], wm.m[13], wm.m[14]};
+
+        EffectorAnchor a;
+        a.node = node;
+        float bestD2 = 1e30f;
+        for (const Cand& c : cands) {
+            if (bestD2 < 1e29f) break; // a previous skin already owns the verts
+            a.skin = c.skin;
+            a.joint = c.joint;
+            // nipple apex: the bust-weighted body vertex nearest to the chain tip
+            for (const MeshInstance& inst : model_->meshInstances) {
+                if (inst.skin != c.skin) continue;
+                for (size_t pi = 0; pi < model_->meshes[inst.mesh].prims.size(); ++pi) {
+                    const Primitive& prim = model_->meshes[inst.mesh].prims[pi];
+                    // skip hair materials (hair can share the body skin)
+                    if (prim.material >= 0 &&
+                        prim.material < static_cast<int>(model_->materials.size())) {
+                        const std::string& mn = model_->materials[prim.material].name;
+                        if (mn.find("HAIR") != std::string::npos ||
+                            mn.find("Hair") != std::string::npos)
+                            continue;
+                    }
+                    for (size_t v = 0; v < prim.pos.size(); ++v) {
+                        if (prim.joints.empty() || prim.weights.empty()) continue;
+                        float w = 0.f;
+                        for (int k = 0; k < 4; ++k)
+                            if (prim.joints[v * 4 + k] == c.joint) w += (&prim.weights[v].x)[k];
+                        if (w < kMinBoneWeight) continue;
+                        Vec3 dv = prim.pos[v] - bonePos;
+                        float d2 = dv.dot(dv);
+                        if (d2 < bestD2) {
+                            bestD2 = d2;
+                            a.apexBind = prim.pos[v];
+                            a.nrmBind = v < prim.normal.size() ? prim.normal[v] : Vec3{0, 1, 0};
+                        }
+                    }
+                }
+            }
+        }
+        if (bestD2 > 1e29f) continue; // bone drives no vertices
+
+        for (const MeshInstance& inst : model_->meshInstances) {
+            if (inst.skin != a.skin) continue;
+            for (size_t pi = 0; pi < model_->meshes[inst.mesh].prims.size(); ++pi) {
+                Primitive& prim = model_->meshes[inst.mesh].prims[pi];
+                if (prim.material >= 0 &&
+                    prim.material < static_cast<int>(model_->materials.size())) {
+                    const std::string& mn = model_->materials[prim.material].name;
+                    if (mn.find("HAIR") != std::string::npos || mn.find("Hair") != std::string::npos)
+                        continue;
+                }
+                for (size_t v = 0; v < prim.pos.size(); ++v) {
+                    Vec3 dv = prim.pos[v] - a.apexBind;
+                    float d2 = dv.dot(dv);
+                    if (d2 > kMaxRadius * kMaxRadius) continue;
+                    EffectorVert ev;
+                    ev.mesh = inst.mesh;
+                    ev.prim = static_cast<int>(pi);
+                    ev.vert = static_cast<int>(v);
+                    ev.d = std::sqrt(d2);
+                    ev.toVert = dv;
+                    ev.basePos = prim.pos[v];
+                    ev.baseNrm = v < prim.normal.size() ? prim.normal[v] : Vec3{0, 1, 0};
+                    a.verts.push_back(ev);
+                }
+            }
+        }
+        effAnchors_.push_back(std::move(a));
+    }
+}
+
+float ShapeController::effectorValue(ShapeParam::Effect kind) const {
+    int idx = effParam_[static_cast<int>(kind)];
+    if (idx < 0) {
+        // sensible defaults when the param is absent (other models)
+        return kind == ShapeParam::Effect::TipRadius ? 0.012f
+             : kind == ShapeParam::Effect::AreolaRadius ? 0.026f
+                                                        : 0.f;
+    }
+    const ShapeParam& p = params_[idx];
+    return p.minS + (p.maxS - p.minS) * p.value;
+}
+
+void ShapeController::applyEffectorsToMesh() {
+    if (!model_ || effAnchors_.empty()) return;
+    const float tipLen = effectorValue(ShapeParam::Effect::Protrude);
+    const float tipR = std::max(effectorValue(ShapeParam::Effect::TipRadius), 1e-3f);
+    const float aR = std::max(effectorValue(ShapeParam::Effect::AreolaRadius), 1e-3f);
+    const float bulge = effectorValue(ShapeParam::Effect::Bulge);
+
+    auto gauss = [](float d, float r) {
+        float x = d / r;
+        return std::exp(-x * x);
+    };
+    for (const EffectorAnchor& a : effAnchors_) {
+        for (const EffectorVert& ev : a.verts) {
+            Primitive& prim = model_->meshes[ev.mesh].prims[ev.prim];
+            if (prim.blendedPos.size() != prim.pos.size() ||
+                prim.blendedNormal.size() != prim.pos.size())
+                continue;
+            float h = 0.f, g = 0.f;
+            if (tipLen > 0.f && ev.d < 2.5f * tipR) {
+                float e = gauss(ev.d, tipR);
+                h += tipLen * e;
+                g += 2.f * tipLen * e / (tipR * tipR);
+            }
+            if (bulge > 0.f && ev.d < 2.5f * aR) {
+                float e = gauss(ev.d, aR);
+                h += bulge * e;
+                g += 2.f * bulge * e / (aR * aR);
+            }
+            // idempotent: rewrite from the stored bind base
+            prim.blendedPos[ev.vert] = ev.basePos + ev.baseNrm * h;
+            // gradient-corrected normal so the dome actually shades
+            prim.blendedNormal[ev.vert] = (ev.baseNrm + ev.toVert * g).normalized();
+        }
+    }
+}
+
+Vec3 ShapeController::effectorAnchorWorld(int index) const {
+    if (index < 0 || index >= static_cast<int>(effAnchors_.size()) || !model_ || !skeleton_)
+        return {0, -1000.f, 0}; // far away: no tint
+    const EffectorAnchor& a = effAnchors_[index];
+    const Skin& skin = model_->skins[a.skin];
+    Mat4 jm = skeleton_->world()[skin.joints[a.joint]] * skin.inverseBindMatrices[a.joint];
+    return jm.transformPoint(a.apexBind);
+}
+
 void ShapeController::addMorphParams() {
     for (size_t mi = 0; mi < model_->meshes.size(); ++mi) {
         Mesh& mesh = model_->meshes[mi];
@@ -283,6 +513,15 @@ void ShapeController::apply() {
                 float& dst = prim.morphWeights[p.morphTarget];
                 if (dst != w) { dst = w; morphsDirty = true; }
             }
+        }
+    }
+
+    // 4) vertex effectors: any change needs a mesh re-stamp + re-upload
+    for (int k = 0; k < 5; ++k) {
+        float v = effectorValue(static_cast<ShapeParam::Effect>(k));
+        if (v != effLast_[k]) {
+            effLast_[k] = v;
+            if (!effAnchors_.empty()) morphsDirty = true;
         }
     }
 }
