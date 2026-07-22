@@ -52,6 +52,7 @@ uniform vec4 uBaseColor;
 uniform int uAlphaMode; // 0 opaque, 1 mask, 2 blend
 uniform float uCutoff;
 uniform int uUnlit;
+uniform int uToon;
 uniform vec3 uLightDir;
 uniform vec3 uCamPos;
 
@@ -65,13 +66,91 @@ void main() {
         vec3 N = normalize(vNrm);
         if (!gl_FrontFacing) N = -N;
         vec3 L = normalize(uLightDir);
-        float wrap = dot(N, L) * 0.5 + 0.5;
         vec3 V = normalize(uCamPos - vPos);
-        vec3 H = normalize(L + V);
-        float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.08;
-        col = col * (0.35 + 0.65 * wrap) + vec3(spec);
+        float ndl = dot(N, L) * 0.5 + 0.5;
+        if (uToon == 1) {
+            // cel shading: two soft-quantized bands; shadows go cool (anime
+            // shade tint) instead of just darker
+            float w = fwidth(ndl) * 1.5 + 1e-4;
+            float s = smoothstep(0.42 - w, 0.42 + w, ndl) * 0.55
+                    + smoothstep(0.72 - w, 0.72 + w, ndl) * 0.45;
+            vec3 shadeCol = col * vec3(0.66, 0.64, 0.78);
+            col = mix(shadeCol, col, clamp(s, 0.0, 1.0));
+            // rim light on the lit side
+            float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.5);
+            rim *= smoothstep(0.30, 0.70, ndl);
+            col += vec3(1.0, 0.98, 0.94) * rim * 0.20;
+        } else {
+            float wrap = ndl;
+            vec3 H = normalize(L + V);
+            float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.08;
+            col = col * (0.35 + 0.65 * wrap) + vec3(spec);
+        }
     }
     fragColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), c.a);
+}
+)glsl";
+
+// Inverted-hull outline: same skinning, then the vertex is pushed along its
+// (projected) normal by a constant screen-space amount.
+const char* kOutlineVS = R"glsl(#version 330 core
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec4 aJoints;
+layout(location=4) in vec4 aWeights;
+
+uniform mat4 uVP;
+uniform mat4 uNodeMat;
+uniform int uUseSkin;
+uniform mat4 uBones[80];
+uniform vec2 uWinSize;
+uniform float uOutlineWidth; // pixels
+
+out vec2 vUV;
+
+void main() {
+    mat4 skin = uNodeMat;
+    if (uUseSkin == 1) {
+        skin = aWeights.x * uBones[int(aJoints.x)]
+             + aWeights.y * uBones[int(aJoints.y)]
+             + aWeights.z * uBones[int(aJoints.z)]
+             + aWeights.w * uBones[int(aJoints.w)];
+    }
+    vec4 wp = skin * vec4(aPos, 1.0);
+    mat3 nrmMat = transpose(inverse(mat3(skin)));
+    vec3 n = nrmMat * aNrm;
+    vec4 cp = uVP * wp;
+    vec3 cn = (uVP * vec4(n, 0.0)).xyz;
+    vec2 dir = cn.xy;
+    float l = length(dir);
+    if (l > 1e-6) {
+        // px -> NDC differs per axis (width vs height of the viewport)
+        cp.xy += (dir / l) * uOutlineWidth * 2.0 / uWinSize * cp.w;
+    }
+    gl_Position = cp;
+    vUV = aUV;
+}
+)glsl";
+
+const char* kOutlineFS = R"glsl(#version 330 core
+in vec2 vUV;
+out vec4 fragColor;
+
+uniform sampler2D uTex;
+uniform int uHasTex;
+uniform vec4 uBaseColor;
+uniform int uAlphaMode; // only MASK matters here (blend prims are skipped)
+uniform float uCutoff;
+uniform vec3 uOutlineColor;
+
+void main() {
+    vec4 c = uBaseColor;
+    if (uHasTex == 1) c *= texture(uTex, vUV);
+    if (uAlphaMode == 1 && c.a < uCutoff) discard;
+    // outline tinted by albedo (MToon-style), not pure black
+    vec3 col = uOutlineColor * c.rgb;
+    fragColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), 1.0);
 }
 )glsl";
 
@@ -99,6 +178,7 @@ void main() {
 bool ModelRenderer::init(std::string& error) {
     if (!modelShader_.compile(kModelVS, kModelFS, error)) return false;
     if (!gridShader_.compile(kGridVS, kGridFS, error)) return false;
+    if (!outlineShader_.compile(kOutlineVS, kOutlineFS, error)) return false;
 
     // 1x1 white fallback texture
     glGenTextures(1, &whiteTex_);
@@ -396,8 +476,26 @@ void ModelRenderer::drawPrim(const GpuPrim& gp, const GpuModelData& slot) {
     glBindVertexArray(0);
 }
 
+void ModelRenderer::setSkinUniforms(Shader& sh, const Skeleton& skeleton,
+                                    const Model& slotModel, const Model& skinModel,
+                                    int forceSkin, const MeshInstance& inst, bool anySkinned) {
+    (void)slotModel;
+    int skinToUse = (forceSkin >= 0) ? forceSkin : inst.skin;
+    sh.setInt("uUseSkin", 0);
+    sh.setMat4("uNodeMat", forceSkin >= 0 ? Mat4::identity() : skeleton.world()[inst.node]);
+    if (anySkinned && skinToUse >= 0 && skinToUse < static_cast<int>(skinModel.skins.size())) {
+        const Skin& skin = skinModel.skins[skinToUse];
+        int nb = std::min(static_cast<int>(skin.joints.size()), kMaxBones);
+        if (static_cast<int>(boneMats_.size()) < nb) boneMats_.resize(nb);
+        for (int i = 0; i < nb; ++i)
+            boneMats_[i] = skeleton.world()[skin.joints[i]] * skin.inverseBindMatrices[i];
+        sh.setInt("uUseSkin", 1);
+        glUniformMatrix4fv(sh.location("uBones"), nb, GL_FALSE, boneMats_[0].m);
+    }
+}
+
 void ModelRenderer::drawSlot(GpuModelData& slot, const Skeleton& skeleton,
-                             const Model& bodyModel, int pass) {
+                              const Model& bodyModel, int pass) {
     const Model& model = *slot.model;
     // Clothing slots: vertices are in body bind space and index the body skin.
     const Model& skinModel = (slot.forceSkin >= 0) ? bodyModel : model;
@@ -406,23 +504,11 @@ void ModelRenderer::drawSlot(GpuModelData& slot, const Skeleton& skeleton,
         if (inst.mesh < 0 || inst.mesh >= static_cast<int>(slot.meshes.size())) continue;
         const GpuMesh& gm = slot.meshes[inst.mesh];
 
-        int skinToUse = (slot.forceSkin >= 0) ? slot.forceSkin : inst.skin;
         bool anySkinned = false;
         for (const GpuPrim& gp : gm.prims)
             if (gp.skinned) { anySkinned = true; break; }
-
-        modelShader_.setInt("uUseSkin", 0);
-        modelShader_.setMat4("uNodeMat", slot.forceSkin >= 0 ? Mat4::identity()
-                                                             : skeleton.world()[inst.node]);
-        if (anySkinned && skinToUse >= 0 && skinToUse < static_cast<int>(skinModel.skins.size())) {
-            const Skin& skin = skinModel.skins[skinToUse];
-            int nb = std::min(static_cast<int>(skin.joints.size()), kMaxBones);
-            if (static_cast<int>(boneMats_.size()) < nb) boneMats_.resize(nb);
-            for (int i = 0; i < nb; ++i)
-                boneMats_[i] = skeleton.world()[skin.joints[i]] * skin.inverseBindMatrices[i];
-            modelShader_.setInt("uUseSkin", 1);
-            glUniformMatrix4fv(modelShader_.location("uBones"), nb, GL_FALSE, boneMats_[0].m);
-        }
+        setSkinUniforms(modelShader_, skeleton, model, skinModel, slot.forceSkin, inst,
+                        anySkinned);
 
         for (const GpuPrim& gp : gm.prims) {
             const Material* mat = nullptr;
@@ -436,16 +522,91 @@ void ModelRenderer::drawSlot(GpuModelData& slot, const Skeleton& skeleton,
     }
 }
 
+void ModelRenderer::drawPrimOutline(const GpuPrim& gp, const GpuModelData& slot) {
+    const Model& model = *slot.model;
+    const Material* mat = nullptr;
+    if (gp.material >= 0 && gp.material < static_cast<int>(model.materials.size()))
+        mat = &model.materials[gp.material];
+
+    int alphaMode = 0;
+    float cutoff = 0.5f;
+    Vec4 base{1, 1, 1, 1};
+    unsigned tex = whiteTex_;
+    if (mat) {
+        alphaMode = mat->alpha == Material::Alpha::Mask ? 1 : 0;
+        cutoff = mat->alphaCutoff;
+        base = mat->baseColor;
+        if (mat->texture >= 0 && mat->texture < static_cast<int>(slot.textures.size()))
+            tex = slot.textures[mat->texture];
+    }
+    outlineShader_.setInt("uAlphaMode", alphaMode);
+    outlineShader_.setFloat("uCutoff", cutoff);
+    outlineShader_.setVec4("uBaseColor", base);
+    outlineShader_.setInt("uHasTex", 1);
+    outlineShader_.setInt("uTex", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    glBindVertexArray(gp.vao);
+    glDrawElements(GL_TRIANGLES, gp.indexCount, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+}
+
+void ModelRenderer::drawSlotOutline(GpuModelData& slot, const Skeleton& skeleton,
+                                    const Model& bodyModel) {
+    const Model& model = *slot.model;
+    const Model& skinModel = (slot.forceSkin >= 0) ? bodyModel : model;
+
+    for (const MeshInstance& inst : model.meshInstances) {
+        if (inst.mesh < 0 || inst.mesh >= static_cast<int>(slot.meshes.size())) continue;
+        const GpuMesh& gm = slot.meshes[inst.mesh];
+
+        bool anySkinned = false;
+        for (const GpuPrim& gp : gm.prims)
+            if (gp.skinned) { anySkinned = true; break; }
+        setSkinUniforms(outlineShader_, skeleton, model, skinModel, slot.forceSkin, inst,
+                        anySkinned);
+
+        for (const GpuPrim& gp : gm.prims) {
+            const Material* mat = nullptr;
+            if (gp.material >= 0 && gp.material < static_cast<int>(model.materials.size()))
+                mat = &model.materials[gp.material];
+            if (mat && mat->alpha == Material::Alpha::Blend) continue; // no outline on glass
+            if (hideHair && mat && isHairMaterial(mat->name)) continue;
+            drawPrimOutline(gp, slot);
+        }
+    }
+}
+
 void ModelRenderer::draw(const Skeleton& skeleton, const Model& bodyModel, const Camera& camera,
-                         float aspect, bool wireframe) {
+                          float aspect, bool wireframe, int winW, int winH) {
     Mat4 vp = camera.projection(aspect) * camera.view();
+    glEnable(GL_DEPTH_TEST);
+
+    // ---- inverted-hull outline (back faces pushed along the normal) ----
+    if (outlineEnabled && !wireframe) {
+        outlineShader_.use();
+        outlineShader_.setMat4("uVP", vp);
+        outlineShader_.setVec2("uWinSize", Vec2{static_cast<float>(winW),
+                                                static_cast<float>(winH)});
+        outlineShader_.setFloat("uOutlineWidth", outlineWidth);
+        outlineShader_.setVec3("uOutlineColor", outlineColor);
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        for (GpuModelData& slot : slots_) {
+            if (!slot.model || !slot.visible) continue;
+            drawSlotOutline(slot, skeleton, bodyModel);
+        }
+        glCullFace(GL_BACK);
+    }
+
     modelShader_.use();
     modelShader_.setMat4("uVP", vp);
     modelShader_.setVec3("uLightDir", Vec3{0.5f, 0.9f, 0.7f}.normalized());
     modelShader_.setVec3("uCamPos", camera.eye());
+    modelShader_.setInt("uToon", toonShading ? 1 : 0);
 
     if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    glEnable(GL_DEPTH_TEST);
 
     // two passes across all slots: opaque+mask first, then blended w/o depth writes
     for (int pass = 0; pass < 2; ++pass) {

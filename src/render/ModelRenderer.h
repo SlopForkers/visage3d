@@ -22,6 +22,13 @@ public:
     bool hideHair = false;
     Vec4 hairTint{1, 1, 1, 1};
 
+    // Anime look: cel shading (banded light, cool shadow tint, rim) and an
+    // inverted-hull outline with constant screen-space width.
+    bool toonShading = true;
+    bool outlineEnabled = true;
+    float outlineWidth = 2.0f;              // pixels
+    Vec3 outlineColor{0.22f, 0.22f, 0.24f}; // multiplied by albedo
+
     bool init(std::string& error);
 
     // Registers a model, uploads its meshes/textures, returns slot id.
@@ -38,7 +45,7 @@ public:
     void syncStatic(int slot);
 
     void draw(const Skeleton& skeleton, const Model& bodyModel, const Camera& camera,
-              float aspect, bool wireframe);
+              float aspect, bool wireframe, int winW, int winH);
     void drawGrid(const Camera& camera, float aspect);
 
     bool hasModel() const;
@@ -63,7 +70,7 @@ private:
         int forceSkin = -1; // >=0: draw all skinned prims with this body skin
     };
 
-    Shader modelShader_, gridShader_;
+    Shader modelShader_, gridShader_, outlineShader_;
     std::vector<GpuModelData> slots_;
     unsigned whiteTex_ = 0;
     unsigned gridVao_ = 0, gridVbo_ = 0;
@@ -77,6 +84,12 @@ private:
     void releaseSlot(GpuModelData& slot);
     void drawSlot(GpuModelData& slot, const Skeleton& skeleton, const Model& bodyModel, int pass);
     void drawPrim(const GpuPrim& gp, const GpuModelData& slot);
+    void drawSlotOutline(GpuModelData& slot, const Skeleton& skeleton, const Model& bodyModel);
+    void drawPrimOutline(const GpuPrim& gp, const GpuModelData& slot);
+    // shared per-instance skinning uniforms for sh (uUseSkin/uNodeMat/uBones)
+    void setSkinUniforms(Shader& sh, const Skeleton& skeleton, const Model& slotModel,
+                         const Model& skinModel, int forceSkin, const MeshInstance& inst,
+                         bool anySkinned);
     static bool isHairMaterial(const std::string& name);
 };
 
